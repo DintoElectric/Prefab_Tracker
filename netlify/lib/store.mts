@@ -18,6 +18,16 @@ export const usersStore = () => getStore('users');
 export const requestsStore = () => getStore('requests');
 export const configStore = () => getStore('config');
 export const materialsStore = () => getStore('materials');
+export const profilesStore = () => getStore('profiles');
+
+export interface SpecProfileRecord {
+  id: string;
+  name: string;
+  active: boolean;
+  notes?: string;
+  limits: Record<string, string[]>;
+  createdAt: string;
+}
 
 // ── passwords ──
 
@@ -143,10 +153,16 @@ let seeded = false;
 export async function ensureSeed() {
   if (seeded) return;
   const cfg = configStore();
-  const done = await cfg.get('seeded-v1');
-  if (done) { seeded = true; return; }
-
   const us = usersStore();
+
+  // Self-healing: the flag alone isn't trusted — the admin record must
+  // actually exist. If the flag was set but users are missing (partial or
+  // mismatched earlier seed), re-run the idempotent seeding below.
+  const done = await cfg.get('seeded-v1');
+  if (done) {
+    const admin = await us.get('jnowak');
+    if (admin) { seeded = true; return; }
+  }
   for (const s of SEED_USERS) {
     const exists = await us.get(s.username);
     if (exists) continue;
@@ -161,7 +177,8 @@ export async function ensureSeed() {
     if (!exists) await ms.setJSON(id, rows);
   }
 
-  await cfg.set('seq', '1044');
+  const seq = await cfg.get('seq');
+  if (!seq) await cfg.set('seq', '1044'); // never reset an advanced counter on a self-heal
   await cfg.set('seeded-v1', new Date().toISOString());
   seeded = true;
 }
@@ -172,4 +189,46 @@ export async function nextRequestId(): Promise<string> {
   const n = Number(raw) || 1044;
   await cfg.set('seq', String(n + 1));
   return 'PR-' + n;
+}
+
+// ── job spec profile seeding ──
+// Separate from the user/materials seed so it also lands on sites that were
+// deployed (and flagged seeded-v1) before profiles existed. Allow-lists were
+// extracted from the Yale Design Standard, Division 26 (26 05 33 rev. 8/1/17
+// and 26 05 00 rev. 8/1/17) and mapped onto the catalog's option codes.
+const YALE_PROFILE: SpecProfileRecord = {
+  id: 'yale-university-spec',
+  name: 'Yale University Spec',
+  active: true,
+  notes:
+    'Yale Design Standard, Div 26. Connectors: compression only — set screw fittings are not ' +
+    'acceptable on EMT (26 05 33 E.6); die-cast zinc fittings and Greenfield connectors are ' +
+    'prohibited (E.4, E.2). Conduit mfg per 26 05 33 D.3 (Allied, Republic; Western not stocked). ' +
+    'Wire mfg per 26 05 00 E.1 (Cerro is the only approved brand the shop stocks); wire must be ' +
+    'stranded copper XHHW-2 (26 05 00 F.1). Conduit min 3/4" above grade — 1/2" only to a single ' +
+    'device under 20% fill (26 05 33 B.10). Note 26 05 33 F.12 sets a 2-1/2" min device box ' +
+    'depth; box styles are left open here — confirm box selection with the Yale PM.',
+  limits: {
+    mfgWire: ['CERROWIRE'],
+    mfgConduit: ['ALLIED', 'REPUBLIC'],
+    conn: ['CP']
+  },
+  createdAt: new Date().toISOString()
+};
+
+let profilesSeeded = false;
+export async function ensureProfileSeed() {
+  if (profilesSeeded) return;
+  const cfg = configStore();
+  const ps = profilesStore();
+  const done = await cfg.get('seeded-profiles-v1');
+  if (done) {
+    // Self-healing, same policy as the account seed.
+    const yale = await ps.get(YALE_PROFILE.id);
+    if (yale) { profilesSeeded = true; return; }
+  }
+  const exists = await ps.get(YALE_PROFILE.id);
+  if (!exists) await ps.setJSON(YALE_PROFILE.id, YALE_PROFILE);
+  await cfg.set('seeded-profiles-v1', new Date().toISOString());
+  profilesSeeded = true;
 }
