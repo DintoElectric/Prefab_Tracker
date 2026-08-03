@@ -1,5 +1,6 @@
 import {
-  requestsStore, currentUser, nextRequestId, json, unauthorized, forbidden
+  requestsStore, profilesStore, currentUser, nextRequestId, json, unauthorized, forbidden,
+  type SpecProfileRecord
 } from '../lib/store.mts';
 
 const STATUSES = ['Submitted', 'Scheduled', 'In Build', 'Ready', 'Closed'];
@@ -45,6 +46,34 @@ function cleanLines(lines: any): any[] | null {
   return out;
 }
 
+// Re-check every submitted line against a profile's allow-lists so the
+// limits can't be bypassed by calling the API directly (mirrors how `by`
+// and role checks work). Blank option values always pass — selecting
+// nothing can't violate a spec.
+const LIMITED_OPT_KEYS = ['boxStyle', 'ringStyle', 'ringSize', 'trade', 'conn'];
+const MFG_LIMIT_KEY: Record<string, string> = { box: 'mfgBox', wire: 'mfgWire', conduit: 'mfgConduit' };
+function profileViolation(profile: SpecProfileRecord, lines: any[]): string | null {
+  const limits = profile.limits || {};
+  for (const l of lines) {
+    for (const key of LIMITED_OPT_KEYS) {
+      const limit = limits[key];
+      if (!limit || !limit.length) continue;
+      const v = l.opts?.[key];
+      if (typeof v === 'string' && v !== '' && !limit.includes(v)) {
+        return `Line ${l.assemblyId}: ${key} "${v}" is not permitted by ${profile.name}`;
+      }
+    }
+    for (const [cls, key] of Object.entries(MFG_LIMIT_KEY)) {
+      const limit = limits[key];
+      const pref = l.mfgPref?.[cls];
+      if (limit && limit.length && typeof pref === 'string' && pref && !limit.includes(pref)) {
+        return `Line ${l.assemblyId}: ${cls} manufacturer "${pref}" is not permitted by ${profile.name}`;
+      }
+    }
+  }
+  return null;
+}
+
 export default async function handler(req: Request, context: any) {
   const user = await currentUser(req);
   if (!user) return unauthorized();
@@ -67,6 +96,21 @@ export default async function handler(req: Request, context: any) {
     if (!job) return json({ error: 'Job name is required' }, 400);
     const lines = cleanLines(body.lines);
     if (!lines) return json({ error: 'At least one assembly line is required' }, 400);
+
+    // Job spec profile — optional; when present it must exist, be active,
+    // and every line must be inside its allow-lists.
+    let profileId: string | null = null;
+    let profileName: string | null = null;
+    if (typeof body.profileId === 'string' && body.profileId) {
+      const profile = (await profilesStore().get(body.profileId, { type: 'json' })) as SpecProfileRecord | null;
+      if (!profile) return json({ error: 'Unknown job spec profile' }, 400);
+      if (!profile.active) return json({ error: `${profile.name} is not active` }, 400);
+      const bad = profileViolation(profile, lines);
+      if (bad) return json({ error: bad }, 400);
+      profileId = profile.id;
+      profileName = profile.name;
+    }
+
     const reqId = await nextRequestId();
     const record = {
       id: reqId,
@@ -78,6 +122,8 @@ export default async function handler(req: Request, context: any) {
       status: 'Submitted',
       week: null,
       lines,
+      profileId,
+      profileName,
       createdAt: new Date().toISOString()
     };
     await store.setJSON(reqId, record);
