@@ -1,4 +1,4 @@
-import type { PrefabRequest, MaterialRow, SessionUser, Role } from '../data/model';
+import type { PrefabRequest, MaterialRow, SessionUser, Role, SpecProfile, SpecProfileLimits } from '../data/model';
 
 export interface AccountRow {
   username: string; name: string; role: Role; active: boolean; createdAt: string;
@@ -29,7 +29,7 @@ export const api = {
 
   listRequests: () => call<{ requests: PrefabRequest[] }>('/api/requests'),
   createRequest: (payload: {
-    job: string; needBy: string; priority: string; notes: string;
+    job: string; needBy: string; priority: string; notes: string; profileId?: string | null;
     lines: { assemblyId: string; opts: Record<string, string | string[]>; code: string; qty: number; mfgPref?: Record<string, string> }[];
   }) => call<{ request: PrefabRequest }>('/api/requests', { method: 'POST', body: JSON.stringify(payload) }),
   patchRequest: (id: string, body: object) =>
@@ -44,5 +44,12 @@ export const api = {
   createUser: (u: { username: string; name: string; role: Role; password: string }) =>
     call<{ user: AccountRow }>('/api/users', { method: 'POST', body: JSON.stringify(u) }),
   patchUser: (username: string, body: object) =>
-    call<{ user: AccountRow }>(`/api/users/${username}`, { method: 'PATCH', body: JSON.stringify(body) })
+    call<{ user: AccountRow }>(`/api/users/${username}`, { method: 'PATCH', body: JSON.stringify(body) }),
+
+  listProfiles: () => call<{ profiles: SpecProfile[] }>('/api/profiles'),
+  createProfile: (p: { name: string; notes?: string; limits: SpecProfileLimits; active?: boolean }) =>
+    call<{ profile: SpecProfile }>('/api/profiles', { method: 'POST', body: JSON.stringify(p) }),
+  putProfile: (id: string, body: { name?: string; notes?: string; limits?: SpecProfileLimits; active?: boolean }) =>
+    call<{ profile: SpecProfile }>(`/api/profiles/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteProfile: (id: string) => call<{ ok: true }>(`/api/profiles/${id}`, { method: 'DELETE' })
 };
