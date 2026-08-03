@@ -1,13 +1,14 @@
-import { itemOf, optSummary, prefSummary, type RequestLine } from '../data/model';
+import { itemOf, optSummary, prefSummary, lineViolation, type RequestLine, type SpecProfile } from '../data/model';
 import { CodeStrip, Thumb } from '../lib/ui';
 
-export interface Hdr { job: string; needBy: string; priority: 'Standard' | 'Hot'; notes: string; }
+export interface Hdr { job: string; needBy: string; priority: 'Standard' | 'Hot'; notes: string; profileId?: string | null; }
 
-export function Review({ cart, hdr, setHdr, byName, onQty, onRemove, onSubmit, onBrowse, submitting }: {
+export function Review({ cart, hdr, setHdr, byName, profiles, onQty, onRemove, onSubmit, onBrowse, submitting }: {
   cart: RequestLine[];
   hdr: Hdr;
   setHdr: (h: Hdr) => void;
   byName: string;
+  profiles: SpecProfile[];
   onQty: (i: number, qty: number) => void;
   onRemove: (i: number) => void;
   onSubmit: () => void;
@@ -15,6 +16,8 @@ export function Review({ cart, hdr, setHdr, byName, onQty, onRemove, onSubmit, o
   submitting: boolean;
 }) {
   const total = cart.reduce((a, l) => a + l.qty, 0);
+  const activeProfiles = profiles.filter(p => p.active);
+  const profile = profiles.find(p => p.id === hdr.profileId) || null;
   return (
     <div className="page-col">
       <div className="page-title-row">
@@ -46,6 +49,14 @@ export function Review({ cart, hdr, setHdr, byName, onQty, onRemove, onSubmit, o
               onClick={() => setHdr({ ...hdr, priority: 'Hot' })}>Hot</button>
           </div>
         </div>
+        <div className="hdr-cell">
+          <label htmlFor="rv-spec">Job spec profile</label>
+          <select id="rv-spec" className="input" value={hdr.profileId || ''}
+            onChange={e => setHdr({ ...hdr, profileId: e.target.value || null })}>
+            <option value="">No spec profile — full catalog</option>
+            {activeProfiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
         <div className="hdr-cell full">
           <label htmlFor="rv-notes">Notes for prefab</label>
           <textarea id="rv-notes" className="input" rows={2} placeholder="Gate 3 delivery. Stage on 4th floor east."
@@ -74,13 +85,15 @@ export function Review({ cart, hdr, setHdr, byName, onQty, onRemove, onSubmit, o
               const it = itemOf(l.assemblyId);
               if (!it) return null;
               const pref = prefSummary(l);
+              const bad = lineViolation(profile, l.assemblyId, l.opts, l.mfgPref);
               return (
-                <tr key={i}>
+                <tr key={i} className={bad ? 'spec-bad' : ''}>
                   <td><Thumb id={l.assemblyId} title={it.title} size={70} /></td>
                   <td>
                     <div className="rt-title">{it.title}</div>
                     <div className="rt-sum">{optSummary(l.assemblyId, l.opts)}</div>
                     {pref && <div className="rt-pref">{pref}</div>}
+                    {bad && <div className="rt-violation">Out of spec — {bad}. Remove this line and reconfigure it.</div>}
                   </td>
                   <td><CodeStrip id={l.assemblyId} opts={l.opts} size="review" /></td>
                   <td>
