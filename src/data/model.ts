@@ -101,7 +101,7 @@ const RING_STYLE = [
 const RING_SIZE = [
   { v: '', label: 'Blank — Box only' }, { v: '04', label: '04 — 1/4" Raise' }, { v: '08', label: '08 — 1/2" Raise' },
   { v: '10', label: '10 — 5/8" Raise' }, { v: '12', label: '12 — 3/4" Raise' }, { v: '16', label: '16 — 1" Raise' },
-  { v: '20', label: '20 — 1-1/4" Raise' }, { v: '24', label: '24 — 1-1/2" Raise' }, { v: '32', label: '32 — 2" Raise' }
+  { v: '20', label: '20 — 1-1/4" Raise' }, { v: '24', label: '24 — 1-1/2" Raise' }, { v: '32', label: '32 — 2" Raise' }, { v: 'ADJ', label: 'ADJ — Adjustable' }
 ];
 const BOX_STYLE = [
   { v: '4D', label: '4D — 4"Sq, 2-1/8" Deep' }, { v: '43B', label: '43B — 4"Sq, 2-1/8" Deep, 1" KO' },
