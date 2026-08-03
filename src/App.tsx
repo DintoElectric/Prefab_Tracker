@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ROLE_VIEWS, STATUSES, itemOf, codeFor, inferCls,
-  type PrefabRequest, type RequestLine, type MaterialRow, type SessionUser
+  ROLE_VIEWS, STATUSES, itemOf, codeFor, inferCls, lineViolation,
+  type PrefabRequest, type RequestLine, type MaterialRow, type SessionUser, type SpecProfile
 } from './data/model';
 import { api } from './lib/api';
 import { Login } from './views/Login';
@@ -14,6 +14,7 @@ import { Schedule } from './views/Schedule';
 import { Ticket } from './views/Ticket';
 import { Materials } from './views/Materials';
 import { Users } from './views/Users';
+import { Profiles } from './views/Profiles';
 
 const CART_KEY = 'dinto-prefab-cart-v1';
 const ROLE_TAG: Record<string, { cls: string; label: string }> = {
@@ -23,11 +24,11 @@ const ROLE_TAG: Record<string, { cls: string; label: string }> = {
 };
 const TAB_LABEL: Record<string, string> = {
   catalog: 'Catalog', review: 'Request', mine: 'Mine', queue: 'Queue',
-  schedule: 'Schedule', ticket: 'Ticket', materials: 'Materials', users: 'Users'
+  schedule: 'Schedule', ticket: 'Ticket', materials: 'Materials', profiles: 'Profiles', users: 'Users'
 };
 
 interface CartDraft { hdr: Hdr; lines: RequestLine[]; }
-const emptyHdr = (): Hdr => ({ job: '', needBy: '', priority: 'Standard', notes: '' });
+const emptyHdr = (): Hdr => ({ job: '', needBy: '', priority: 'Standard', notes: '', profileId: null });
 
 function loadCart(username: string): CartDraft {
   try {
@@ -55,6 +56,7 @@ export default function App() {
   const [hdr, setHdrState] = useState<Hdr>(emptyHdr());
   const [requests, setRequests] = useState<PrefabRequest[]>([]);
   const [materials, setMaterials] = useState<Record<string, MaterialRow[]>>({});
+  const [profiles, setProfiles] = useState<SpecProfile[]>([]);
   const [cfgId, setCfgId] = useState<string | null>(null);
   const [zoom, setZoom] = useState<{ img: string; title: string } | null>(null);
   const [toast, setToast] = useState('');
@@ -84,9 +86,12 @@ export default function App() {
   const refresh = useCallback(async () => {
     if (!user) return;
     try {
-      const [{ requests }, { materials }] = await Promise.all([api.listRequests(), api.getMaterials()]);
+      const [{ requests }, { materials }, { profiles }] = await Promise.all([
+        api.listRequests(), api.getMaterials(), api.listProfiles()
+      ]);
       setRequests(requests);
       setMaterials(materials);
+      setProfiles(profiles);
     } catch (e: any) {
       if (e.status === 401) setUser(null);
     }
@@ -147,10 +152,18 @@ export default function App() {
   const submit = async () => {
     if (!cart.length) { flash('Add at least one assembly first'); return; }
     if (!hdr.job.trim()) { flash('Job name is required'); return; }
+    const profile = profiles.find(p => p.id === hdr.profileId) || null;
+    if (profile) {
+      // Catch lines configured before the profile was chosen (or under a
+      // different one). The server re-checks this regardless.
+      const bad = cart.map(l => lineViolation(profile, l.assemblyId, l.opts, l.mfgPref)).find(Boolean);
+      if (bad) { flash(bad); return; }
+    }
     setSubmitting(true);
     try {
       const { request } = await api.createRequest({
         job: hdr.job, needBy: hdr.needBy, priority: hdr.priority, notes: hdr.notes,
+        profileId: profile ? profile.id : null,
         lines: cart.map(l => ({ assemblyId: l.assemblyId, opts: l.opts, code: l.code, qty: l.qty, mfgPref: l.mfgPref as Record<string, string> | undefined }))
       });
       const clearedHdr = { ...hdr, job: '', notes: '' };
@@ -280,13 +293,15 @@ export default function App() {
       <main className="canvas">
         {effectiveView === 'catalog' && (
           <Catalog query={query} setQuery={setQuery} cat={cat} setCat={setCat} cart={cart}
+            profiles={profiles} profileId={hdr.profileId || null}
+            setProfileId={(id) => setHdr({ ...hdr, profileId: id })}
             onConfigure={setCfgId}
             onZoom={(id, title) => setZoom({ img: `assets/asm-${id}.png`, title })}
             onRemoveLine={removeLine}
             onReview={() => setView('review')} />
         )}
         {effectiveView === 'review' && (
-          <Review cart={cart} hdr={hdr} setHdr={setHdr} byName={user.name}
+          <Review cart={cart} hdr={hdr} setHdr={setHdr} byName={user.name} profiles={profiles}
             onQty={setLineQty} onRemove={removeLine}
             onSubmit={submit} onBrowse={() => setView('catalog')} submitting={submitting} />
         )}
@@ -306,10 +321,18 @@ export default function App() {
         {effectiveView === 'materials' && (
           <Materials materials={materials} onSave={saveMaterials} flash={flash} />
         )}
+        {effectiveView === 'profiles' && (
+          <Profiles profiles={profiles} onChanged={refresh} flash={flash} />
+        )}
         {effectiveView === 'users' && <Users me={user.username} flash={flash} />}
       </main>
 
-      {cfgId && <ConfigDrawer assemblyId={cfgId} onAdd={(opts, qty, pref) => addToCart(cfgId, opts, qty, pref)} onClose={() => setCfgId(null)} />}
+      {cfgId && (
+        <ConfigDrawer assemblyId={cfgId}
+          profile={profiles.find(p => p.id === hdr.profileId && p.active) || null}
+          onAdd={(opts, qty, pref) => addToCart(cfgId, opts, qty, pref)}
+          onClose={() => setCfgId(null)} />
+      )}
 
       {zoom && (
         <div className="lightbox" onClick={() => setZoom(null)}>
