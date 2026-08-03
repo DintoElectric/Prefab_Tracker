@@ -96,7 +96,7 @@ export const CATALOG: Assembly[] = raw.map(([id, title, category, system, kind])
 
 const RING_STYLE = [
   { v: '', label: 'Blank — Box only' }, { v: '1', label: '1 — One Device' }, { v: '2', label: '2 — Two Device' },
-  { v: 'R', label: 'R — Round' }, { v: 'E', label: 'E — 1-1/2" Deep Extension Box' }
+  { v: 'R', label: 'R — Round' }, { v: 'E', label: 'E — 1-1/2" Deep Extension Box'}, { v: 'E1', label: 'E1 — Extension 1 Gang' }, { v: 'E2', label: 'E2 — Extension 2 Gang' }
 ];
 const RING_SIZE = [
   { v: '', label: 'Blank — Box only' }, { v: '04', label: '04 — 1/4" Raise' }, { v: '08', label: '08 — 1/2" Raise' },
