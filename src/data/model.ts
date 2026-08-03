@@ -52,6 +52,76 @@ export interface PrefabRequest {
   status: Status;
   week: string | null;      // ISO Monday of the assigned build week
   lines: RequestLine[];
+  profileId?: string | null;   // job spec profile the request was built under
+  profileName?: string | null; // snapshot of the profile name at submit time
+}
+
+// ── Job spec profiles — admin-defined allow-lists that narrow the catalog ──
+// An absent key means "no restriction on that field". Empty-string option
+// values (the "Blank — box only" style choices) always pass, since selecting
+// nothing can't violate a spec.
+export interface SpecProfileLimits {
+  mfgBox?: string[];
+  mfgWire?: string[];
+  mfgConduit?: string[];
+  boxStyle?: string[];
+  ringStyle?: string[];
+  ringSize?: string[];
+  trade?: string[];
+  conn?: string[];
+}
+export interface SpecProfile {
+  id: string;
+  name: string;
+  active: boolean;
+  notes?: string;
+  limits: SpecProfileLimits;
+  createdAt?: string;
+}
+
+export type LimitKey = keyof SpecProfileLimits;
+export const MFG_LIMIT_KEY: Record<'box' | 'wire' | 'conduit', LimitKey> = {
+  box: 'mfgBox', wire: 'mfgWire', conduit: 'mfgConduit'
+};
+// Schema field keys that a profile can constrain (field key === limit key).
+export const LIMITED_FIELD_KEYS = ['boxStyle', 'ringStyle', 'ringSize', 'trade', 'conn'] as const;
+
+// Intersect a field's options with a profile's allow-list. Blank values pass.
+export function allowedOptions(profile: SpecProfile | null, fieldKey: string, options: { v: string; label: string }[]) {
+  if (!profile) return options;
+  const limit = (profile.limits || {})[fieldKey as LimitKey];
+  if (!limit || !limit.length) return options;
+  return options.filter(o => o.v === '' || limit.includes(o.v));
+}
+// Manufacturer list for a class under a profile ([] limit = unrestricted).
+export function allowedMfg(profile: SpecProfile | null, cls: 'box' | 'wire' | 'conduit') {
+  const base = MFG_BY_CLASS[cls];
+  if (!profile) return { list: base, restricted: false };
+  const limit = (profile.limits || {})[MFG_LIMIT_KEY[cls]];
+  if (!limit || !limit.length) return { list: base, restricted: false };
+  return { list: base.filter(m => limit.includes(m)), restricted: true };
+}
+// First violation of a configured line against a profile, or null if clean.
+export function lineViolation(profile: SpecProfile | null, assemblyId: string, opts: Record<string, string | string[]>, mfgPref?: Partial<Record<'box' | 'wire' | 'conduit', string>>): string | null {
+  if (!profile) return null;
+  const limits = profile.limits || {};
+  for (const f of schemaOf(assemblyId)) {
+    const limit = limits[f.key as LimitKey];
+    if (!limit || !limit.length || f.type === 'checks') continue;
+    const v = String(opts[f.key] ?? f.def ?? '');
+    if (v !== '' && !limit.includes(v)) {
+      const o = f.options.find(x => x.v === v);
+      return `${f.label}: "${o ? o.label : v}" is not permitted by ${profile.name}`;
+    }
+  }
+  for (const cls of ['box', 'wire', 'conduit'] as const) {
+    const limit = limits[MFG_LIMIT_KEY[cls]];
+    const pref = (mfgPref || {})[cls];
+    if (limit && limit.length && pref && !limit.includes(pref)) {
+      return `${CLASS_LABEL[cls]} manufacturer "${pref}" is not permitted by ${profile.name}`;
+    }
+  }
+  return null;
 }
 
 export interface SessionUser {
@@ -96,12 +166,14 @@ export const CATALOG: Assembly[] = raw.map(([id, title, category, system, kind])
 
 const RING_STYLE = [
   { v: '', label: 'Blank — Box only' }, { v: '1', label: '1 — One Device' }, { v: '2', label: '2 — Two Device' },
-  { v: 'R', label: 'R — Round' }, { v: 'E', label: 'E — 1-1/2" Deep Extension Box'}, { v: 'E1', label: 'E1 — Extension 1 Gang' }, { v: 'E2', label: 'E2 — Extension 2 Gang' }
+  { v: 'R', label: 'R — Round' }, { v: 'E', label: 'E — 1-1/2" Deep Extension Box' },
+  { v: 'E1', label: 'E1 — Extension 1 Gang' }, { v: 'E2', label: 'E2 — Extension 2 Gang' }
 ];
 const RING_SIZE = [
   { v: '', label: 'Blank — Box only' }, { v: '04', label: '04 — 1/4" Raise' }, { v: '08', label: '08 — 1/2" Raise' },
   { v: '10', label: '10 — 5/8" Raise' }, { v: '12', label: '12 — 3/4" Raise' }, { v: '16', label: '16 — 1" Raise' },
-  { v: '20', label: '20 — 1-1/4" Raise' }, { v: '24', label: '24 — 1-1/2" Raise' }, { v: '32', label: '32 — 2" Raise' }, { v: 'ADJ', label: 'ADJ — Adjustable' }
+  { v: '20', label: '20 — 1-1/4" Raise' }, { v: '24', label: '24 — 1-1/2" Raise' }, { v: '32', label: '32 — 2" Raise' },
+  { v: 'ADJ', label: 'ADJ — Adjustable' }
 ];
 const BOX_STYLE = [
   { v: '4D', label: '4D — 4"Sq, 2-1/8" Deep' }, { v: '43B', label: '43B — 4"Sq, 2-1/8" Deep, 1" KO' },
@@ -173,8 +245,24 @@ export const SCHEMAS: Record<AssemblyKind, OptionField[]> = {
 export const ROLE_VIEWS: Record<Role, string[]> = {
   foreman: ['catalog', 'review', 'mine'],
   prefab: ['queue', 'schedule', 'ticket'],
-  admin: ['catalog', 'review', 'mine', 'queue', 'schedule', 'ticket', 'materials', 'users']
+  admin: ['catalog', 'review', 'mine', 'queue', 'schedule', 'ticket', 'materials', 'profiles', 'users']
 };
+
+// The catalog fields a job spec profile can restrict, with their full option
+// lists — drives both the admin Profiles editor and the drawer filtering.
+export const PROFILE_FIELDS: { limitKey: LimitKey; label: string; options: { v: string; label: string }[] }[] = [
+  { limitKey: 'mfgBox', label: 'Box / fitting manufacturers', options: MFG_BY_CLASS_OPTS('box') },
+  { limitKey: 'mfgWire', label: 'Wire manufacturers', options: MFG_BY_CLASS_OPTS('wire') },
+  { limitKey: 'mfgConduit', label: 'Conduit manufacturers', options: MFG_BY_CLASS_OPTS('conduit') },
+  { limitKey: 'boxStyle', label: 'Box styles', options: BOX_STYLE },
+  { limitKey: 'ringStyle', label: 'Plaster ring styles', options: RING_STYLE.filter(o => o.v !== '') },
+  { limitKey: 'ringSize', label: 'Plaster ring sizes', options: RING_SIZE.filter(o => o.v !== '') },
+  { limitKey: 'trade', label: 'Conduit / flex sizes', options: TRADE },
+  { limitKey: 'conn', label: 'Connector / coupling types', options: CONN }
+];
+function MFG_BY_CLASS_OPTS(cls: 'box' | 'wire' | 'conduit') {
+  return MFG_BY_CLASS[cls].map(m => ({ v: m, label: m }));
+}
 
 export const STATUSES: Status[] = ['Submitted', 'Scheduled', 'In Build', 'Ready', 'Closed'];
 
