@@ -49,6 +49,7 @@ export function Queue({ requests, isAdmin, onAdvance, onDelete, onTicket }: {
                     <td className="mono">{r.id}</td>
                     <td className="job">
                       <div className="n">{r.job}</div>
+                      {r.profileName && <div className="spec-tag">Spec: {r.profileName}</div>}
                       <div className="s">{summary}</div>
                     </td>
                     <td>{r.by.replace(/ — .*$/, '')}</td>
