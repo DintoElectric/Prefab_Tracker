@@ -32,11 +32,12 @@ export function Ticket({ req, tplFor, onBack, onSetMfg }: {
           </div>
         </div>
 
-        <div className="tk-meta">
+      <div className="tk-meta">
           <div><div className="tk-cap">Job name</div><div className="tk-val">{req.job}</div></div>
           <div><div className="tk-cap">Requested by</div><div className="tk-val">{req.by}</div></div>
           <div><div className="tk-cap">Date needed</div><div className="tk-val">{fmtDate(req.needBy)}</div></div>
           <div><div className="tk-cap">Priority</div><div className="tk-val">{req.priority}</div></div>
+          <div><div className="tk-cap">Spec basis</div><div className="tk-val">{req.profileName || 'Shop standard'}</div></div>
         </div>
 
         {req.notes && (
