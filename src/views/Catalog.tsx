@@ -1,12 +1,15 @@
-import { CATALOG, SYS_COLOR, sysColor, prefSummary, type RequestLine, type System, type Category } from '../data/model';
+import { CATALOG, SYS_COLOR, sysColor, prefSummary, type RequestLine, type System, type Category, type SpecProfile } from '../data/model';
 import { CodeStrip, Thumb } from '../lib/ui';
 
 const CATS: ('All' | Category)[] = ['All', 'Boxes', 'Panelboards', 'Brackets', 'Conduit', 'Whips', 'Hardware'];
 
-export function Catalog({ query, setQuery, cat, setCat, cart, onConfigure, onZoom, onRemoveLine, onReview }: {
+export function Catalog({ query, setQuery, cat, setCat, cart, profiles, profileId, setProfileId, onConfigure, onZoom, onRemoveLine, onReview }: {
   query: string; setQuery: (q: string) => void;
   cat: string; setCat: (c: string) => void;
   cart: RequestLine[];
+  profiles: SpecProfile[];
+  profileId: string | null;
+  setProfileId: (id: string | null) => void;
   onConfigure: (id: string) => void;
   onZoom: (id: string, title: string) => void;
   onRemoveLine: (i: number) => void;
@@ -29,6 +32,17 @@ export function Catalog({ query, setQuery, cat, setCat, cart, onConfigure, onZoo
             <button key={c} className={'chip' + (cat === c ? ' sel' : '')} onClick={() => setCat(c)}>{c}</button>
           ))}
         </div>
+        {profiles.some(p => p.active) && (
+          <div className="specbar">
+            <span className="cap">Job spec</span>
+            <select className="input" value={profileId || ''} aria-label="Job spec profile"
+              onChange={e => setProfileId(e.target.value || null)}>
+              <option value="">None — full catalog</option>
+              {profiles.filter(p => p.active).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            {profileId && <span className="spec-note">Options in the configurator are limited to this spec</span>}
+          </div>
+        )}
         <div className="legendbar">
           <span className="cap">Color code</span>
           {(Object.keys(SYS_COLOR) as System[]).map(s => (
@@ -58,14 +72,11 @@ export function Catalog({ query, setQuery, cat, setCat, cart, onConfigure, onZoo
                           <span className="tag-sys" style={{ background: sysColor(it.system) }}>{it.system}</span>
                         </div>
                         <div className="asm-title">{it.title}</div>
+                        <div className="asm-actions">
+                          <button className="btn btn-primary btn-sm" onClick={() => onConfigure(it.id)}>Configure</button>
+                          {inCart > 0 && <span className="incart">{inCart} on request</span>}
+                        </div>
                       </div>
-                    </div>
-                    <div className="asm-foot">
-                      <span className="asm-pg">
-                        Book pg. {it.id}
-                        {inCart > 0 && <span className="onorder"> · {inCart} on order</span>}
-                      </span>
-                      <button className="btn btn-primary btn-add" onClick={() => onConfigure(it.id)}>Add to request</button>
                     </div>
                   </div>
                 );
@@ -75,39 +86,37 @@ export function Catalog({ query, setQuery, cat, setCat, cart, onConfigure, onZoo
         </div>
       </div>
 
-      <aside className="rail">
-        <div className="rail-hdr">
-          <h3>Current request</h3>
-          <div className="rail-sum">
-            {cart.length ? `${cart.length} assemblies · ${totalPieces} pieces` : 'Empty'}
-          </div>
+      <aside className="cart-rail">
+        <div className="cart-head">
+          <span className="t">This request</span>
+          <span className="c">{totalPieces}</span>
         </div>
-        <div className="rail-body">
-          {cart.length === 0 && (
-            <div className="rail-empty">Add assemblies from the catalog. They collect here until you submit.</div>
-          )}
-          {cart.map((l, i) => {
-            const it = CATALOG.find(x => x.id === l.assemblyId);
-            if (!it) return null;
-            const pref = prefSummary(l);
-            return (
-              <div key={i} className="rail-line" style={{ borderLeft: `5px solid ${sysColor(it.system)}` }}>
-                <div className="info">
-                  <div className="t">{it.title}</div>
-                  <CodeStrip id={l.assemblyId} opts={l.opts} size="cart" />
-                  {pref && <div className="pref">{pref}</div>}
-                </div>
-                <div className="right">
-                  <span className="qty">{l.qty}</span>
-                  <button className="btn btn-ghost btn-remove" onClick={() => onRemoveLine(i)}>Remove</button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        <div className="rail-foot">
-          <button className="btn btn-primary" onClick={onReview}>Review &amp; submit</button>
-        </div>
+        {cart.length === 0 ? (
+          <div className="cart-empty">No assemblies yet. Configure one to start a request.</div>
+        ) : (
+          <>
+            <div className="cart-lines">
+              {cart.map((l, i) => {
+                const it = CATALOG.find(x => x.id === l.assemblyId);
+                if (!it) return null;
+                const pref = prefSummary(l);
+                return (
+                  <div key={i} className="cart-line">
+                    <Thumb id={l.assemblyId} title={it.title} size={44} />
+                    <div className="cl-info">
+                      <div className="cl-title">{it.title}</div>
+                      <CodeStrip id={l.assemblyId} opts={l.opts} size="cart" />
+                      {pref && <div className="cl-pref">{pref}</div>}
+                    </div>
+                    <div className="cl-qty">{l.qty}</div>
+                    <button className="cl-x" aria-label="Remove" onClick={() => onRemoveLine(i)}>×</button>
+                  </div>
+                );
+              })}
+            </div>
+            <button className="btn btn-primary cart-review" onClick={onReview}>Review request →</button>
+          </>
+        )}
       </aside>
     </div>
   );
