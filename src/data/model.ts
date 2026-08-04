@@ -248,22 +248,6 @@ export const ROLE_VIEWS: Record<Role, string[]> = {
   admin: ['catalog', 'review', 'mine', 'queue', 'schedule', 'ticket', 'materials', 'profiles', 'users']
 };
 
-// The catalog fields a job spec profile can restrict, with their full option
-// lists — drives both the admin Profiles editor and the drawer filtering.
-export const PROFILE_FIELDS: { limitKey: LimitKey; label: string; options: { v: string; label: string }[] }[] = [
-  { limitKey: 'mfgBox', label: 'Box / fitting manufacturers', options: MFG_BY_CLASS_OPTS('box') },
-  { limitKey: 'mfgWire', label: 'Wire manufacturers', options: MFG_BY_CLASS_OPTS('wire') },
-  { limitKey: 'mfgConduit', label: 'Conduit manufacturers', options: MFG_BY_CLASS_OPTS('conduit') },
-  { limitKey: 'boxStyle', label: 'Box styles', options: BOX_STYLE },
-  { limitKey: 'ringStyle', label: 'Plaster ring styles', options: RING_STYLE.filter(o => o.v !== '') },
-  { limitKey: 'ringSize', label: 'Plaster ring sizes', options: RING_SIZE.filter(o => o.v !== '') },
-  { limitKey: 'trade', label: 'Conduit / flex sizes', options: TRADE },
-  { limitKey: 'conn', label: 'Connector / coupling types', options: CONN }
-];
-function MFG_BY_CLASS_OPTS(cls: 'box' | 'wire' | 'conduit') {
-  return MFG_BY_CLASS[cls].map(m => ({ v: m, label: m }));
-}
-
 export const STATUSES: Status[] = ['Submitted', 'Scheduled', 'In Build', 'Ready', 'Closed'];
 
 // System colors are the book's own wire color selector (page 3, item 6).
@@ -291,6 +275,23 @@ export const MFG_BY_CLASS: Record<'box' | 'wire' | 'conduit', string[]> = {
   conduit: ['ALLIED', 'WHEATLAND', 'REPUBLIC']
 };
 export const CLASS_LABEL: Record<'box' | 'wire' | 'conduit', string> = { box: 'Box / fitting', wire: 'Wire', conduit: 'Conduit' };
+
+// The catalog fields a job spec profile can restrict, with their full option
+// lists — drives both the admin Profiles editor and the drawer filtering.
+// Defined after MFG_BY_CLASS because it reads from it at module load.
+function MFG_BY_CLASS_OPTS(cls: 'box' | 'wire' | 'conduit') {
+  return MFG_BY_CLASS[cls].map(m => ({ v: m, label: m }));
+}
+export const PROFILE_FIELDS: { limitKey: LimitKey; label: string; options: { v: string; label: string }[] }[] = [
+  { limitKey: 'mfgBox', label: 'Box / fitting manufacturers', options: MFG_BY_CLASS_OPTS('box') },
+  { limitKey: 'mfgWire', label: 'Wire manufacturers', options: MFG_BY_CLASS_OPTS('wire') },
+  { limitKey: 'mfgConduit', label: 'Conduit manufacturers', options: MFG_BY_CLASS_OPTS('conduit') },
+  { limitKey: 'boxStyle', label: 'Box styles', options: BOX_STYLE },
+  { limitKey: 'ringStyle', label: 'Plaster ring styles', options: RING_STYLE.filter(o => o.v !== '') },
+  { limitKey: 'ringSize', label: 'Plaster ring sizes', options: RING_SIZE.filter(o => o.v !== '') },
+  { limitKey: 'trade', label: 'Conduit / flex sizes', options: TRADE },
+  { limitKey: 'conn', label: 'Connector / coupling types', options: CONN }
+];
 
 export const PREF_CLASSES: Record<AssemblyKind, ('box' | 'wire' | 'conduit')[]> = {
   box: ['box', 'wire', 'conduit'],
