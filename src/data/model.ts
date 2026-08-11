@@ -1,7 +1,7 @@
 // Domain model — values lifted verbatim from the design handoff's data-model.js.
 
 export type Role = 'foreman' | 'prefab' | 'admin';
-export type AssemblyKind = 'box' | 'conduit' | 'bracket' | 'whip' | 'hardware' | 'panel';
+export type AssemblyKind = 'box' | 'conduit' | 'bracket' | 'whip' | 'hardware' | 'panel' | 'tempcart';
 export type Category = 'Boxes' | 'Panelboards' | 'Brackets' | 'Conduit' | 'Whips' | 'Hardware';
 export type System = 'Power' | 'Data' | 'Fire Alarm' | 'Raceway' | 'Lighting' | 'Support';
 export type MaterialClass = 'box' | 'wire' | 'conduit' | 'other';
@@ -22,7 +22,10 @@ export interface OptionField {
   options: { v: string; label: string }[];
   def: string | string[];
   code?: boolean;
-  type?: 'checks';
+  type?: 'checks' | 'count';
+  // For type 'count': a numeric stepper instead of a dropdown.
+  min?: number;
+  max?: number;
 }
 
 export interface MaterialRow {
@@ -31,6 +34,10 @@ export interface MaterialRow {
   cat: string;
   per: string;
   cls: MaterialClass;
+  // When set to a config field key (e.g. 'gfci'), this row's quantity scales
+  // with that field's numeric value instead of the fixed `per` count. Fixed
+  // rows leave this unset — every existing template is unaffected.
+  perField?: string;
 }
 
 export interface RequestLine {
@@ -159,7 +166,8 @@ const raw: [string, string, Category, System, AssemblyKind][] = [
   ['27', '(L2FS) Lighting Whip Assembly — 2 Fixture, Field Installed, Fee at Switch', 'Whips', 'Lighting', 'whip'],
   ['P1', 'Panelboard Assembly — back box, trough, wiring & internal components', 'Panelboards', 'Power', 'panel'],
   ['23', 'Trapeze Support System', 'Hardware', 'Support', 'hardware'],
-  ['25', 'Threaded Rod 1/2"', 'Hardware', 'Support', 'hardware']
+  ['25', 'Threaded Rod 1/2"', 'Hardware', 'Support', 'hardware'],
+  ['TP1', 'Temp Power Cart — Rubbermaid cart, 6ft strut, GFCI duplex bank, 10ft whip', 'Hardware', 'Power', 'tempcart']
 ];
 
 export const CATALOG: Assembly[] = raw.map(([id, title, category, system, kind]) => ({ id, title, category, system, kind }));
@@ -232,6 +240,9 @@ export const SCHEMAS: Record<AssemblyKind, OptionField[]> = {
     { key: 'length', num: '1', label: 'Length', options: ROD, def: '24', code: true },
     { key: 'span', num: '2', label: 'Span / Spacing', options: SPAN, def: '24', code: true }
   ],
+  tempcart: [
+    { key: 'gfci', num: '1', label: 'GFCI duplex receptacles on strut', type: 'count', options: [], def: '6', min: 3, max: 12, code: true }
+  ],
   panel: [
     { key: 'backBox', num: '1', label: 'Back box', type: 'checks', def: ['Type 1 back box', 'Mounting hardware'], options: [{ v: 'Type 1 back box', label: 'Type 1 back box' }, { v: 'Type 3R back box', label: 'Type 3R back box' }, { v: '5-3/4" deep', label: '5-3/4" deep' }, { v: '7-1/4" deep', label: '7-1/4" deep' }, { v: 'Ground bar kit', label: 'Ground bar kit' }, { v: 'Mounting hardware', label: 'Mounting hardware' }] },
     { key: 'trough', num: '2', label: 'Trough', type: 'checks', def: [], options: [{ v: 'Auxiliary gutter 6" x 6"', label: 'Auxiliary gutter 6" x 6"' }, { v: 'Auxiliary gutter 8" x 8"', label: 'Auxiliary gutter 8" x 8"' }, { v: 'Side mounted', label: 'Side mounted' }, { v: 'Top mounted', label: 'Top mounted' }, { v: 'Removable cover', label: 'Removable cover' }, { v: 'Barrier / divider', label: 'Barrier / divider' }] },
@@ -247,6 +258,29 @@ export const ROLE_VIEWS: Record<Role, string[]> = {
   prefab: ['queue', 'schedule', 'ticket'],
   admin: ['catalog', 'review', 'mine', 'queue', 'schedule', 'ticket', 'materials', 'profiles', 'users']
 };
+
+// The catalog fields a job spec profile can restrict, with their full option
+// lists — drives both the admin Profiles editor and the drawer filtering.
+// Built lazily via a getter so it never reads another module-level constant
+// during initialization; that ordering hazard is what blanked the screen
+// before, and a lazy build makes it structurally impossible to recur.
+const mfgOpts = (cls: 'box' | 'wire' | 'conduit') => MFG_BY_CLASS[cls].map(m => ({ v: m, label: m }));
+let _profileFields: { limitKey: LimitKey; label: string; options: { v: string; label: string }[] }[] | null = null;
+export function getProfileFields() {
+  if (!_profileFields) {
+    _profileFields = [
+      { limitKey: 'mfgBox', label: 'Box / fitting manufacturers', options: mfgOpts('box') },
+      { limitKey: 'mfgWire', label: 'Wire manufacturers', options: mfgOpts('wire') },
+      { limitKey: 'mfgConduit', label: 'Conduit manufacturers', options: mfgOpts('conduit') },
+      { limitKey: 'boxStyle', label: 'Box styles', options: BOX_STYLE },
+      { limitKey: 'ringStyle', label: 'Plaster ring styles', options: RING_STYLE.filter(o => o.v !== '') },
+      { limitKey: 'ringSize', label: 'Plaster ring sizes', options: RING_SIZE.filter(o => o.v !== '') },
+      { limitKey: 'trade', label: 'Conduit / flex sizes', options: TRADE },
+      { limitKey: 'conn', label: 'Connector / coupling types', options: CONN }
+    ];
+  }
+  return _profileFields;
+}
 
 export const STATUSES: Status[] = ['Submitted', 'Scheduled', 'In Build', 'Ready', 'Closed'];
 
@@ -276,30 +310,14 @@ export const MFG_BY_CLASS: Record<'box' | 'wire' | 'conduit', string[]> = {
 };
 export const CLASS_LABEL: Record<'box' | 'wire' | 'conduit', string> = { box: 'Box / fitting', wire: 'Wire', conduit: 'Conduit' };
 
-// The catalog fields a job spec profile can restrict, with their full option
-// lists — drives both the admin Profiles editor and the drawer filtering.
-// Defined after MFG_BY_CLASS because it reads from it at module load.
-function MFG_BY_CLASS_OPTS(cls: 'box' | 'wire' | 'conduit') {
-  return MFG_BY_CLASS[cls].map(m => ({ v: m, label: m }));
-}
-export const PROFILE_FIELDS: { limitKey: LimitKey; label: string; options: { v: string; label: string }[] }[] = [
-  { limitKey: 'mfgBox', label: 'Box / fitting manufacturers', options: MFG_BY_CLASS_OPTS('box') },
-  { limitKey: 'mfgWire', label: 'Wire manufacturers', options: MFG_BY_CLASS_OPTS('wire') },
-  { limitKey: 'mfgConduit', label: 'Conduit manufacturers', options: MFG_BY_CLASS_OPTS('conduit') },
-  { limitKey: 'boxStyle', label: 'Box styles', options: BOX_STYLE },
-  { limitKey: 'ringStyle', label: 'Plaster ring styles', options: RING_STYLE.filter(o => o.v !== '') },
-  { limitKey: 'ringSize', label: 'Plaster ring sizes', options: RING_SIZE.filter(o => o.v !== '') },
-  { limitKey: 'trade', label: 'Conduit / flex sizes', options: TRADE },
-  { limitKey: 'conn', label: 'Connector / coupling types', options: CONN }
-];
-
 export const PREF_CLASSES: Record<AssemblyKind, ('box' | 'wire' | 'conduit')[]> = {
   box: ['box', 'wire', 'conduit'],
   bracket: ['box', 'conduit', 'wire'],
   conduit: ['conduit'],
   whip: ['wire', 'conduit'],
   panel: ['wire', 'box', 'conduit'],
-  hardware: []
+  hardware: [],
+  tempcart: [] // temp power is throwaway field material — manufacturers not specced
 };
 
 const CLS_RULES: [MaterialClass, RegExp][] = [
@@ -338,9 +356,22 @@ export function optSummary(id: string, opts: Record<string, string | string[]>) 
       const list = Array.isArray(v) ? v : [];
       return f.label + ': ' + (list.length ? list.join(', ') : 'none');
     }
+    if (f.type === 'count') return f.label + ': ' + String(v);
     const o = f.options.find(x => x.v === v);
     return f.label + ': ' + (o ? o.label.replace(/^[^—]*— /, '') : '—');
   }).join(' · ');
+}
+
+// Resolve a material row's per-unit count. A row scales with a config field
+// when `perField` names one (e.g. the GFCI count on a temp power cart);
+// otherwise it's the fixed numeric `per`.
+export function rowPer(row: MaterialRow, opts: Record<string, string | string[]>): number {
+  if (row.perField) {
+    const raw = opts[row.perField];
+    const n = Number(Array.isArray(raw) ? raw[0] : raw);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return Number(row.per) || 0;
 }
 export function prefSummary(line: RequestLine) {
   const p = line.mfgPref || {};
@@ -387,7 +418,7 @@ export function pullList(req: PrefabRequest, tplFor: (id: string) => MaterialRow
   const acc: { key: string; desc: string; mfg: string; cat: string; total: number }[] = [];
   req.lines.forEach((l) => {
     tplFor(l.assemblyId).forEach((r, ri) => {
-      const per = Number(r.per) || 0;
+      const per = rowPer(r, l.opts);
       const mfg = resolveMfg(l, r, ri).mfg;
       const key = (mfg + '|' + (r.cat || r.desc)).toLowerCase();
       const hit = acc.find(a => a.key === key);
