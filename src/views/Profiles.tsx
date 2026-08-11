@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { PROFILE_FIELDS, type SpecProfile, type SpecProfileLimits, type LimitKey } from '../data/model';
+import { getProfileFields, type SpecProfile, type SpecProfileLimits, type LimitKey } from '../data/model';
+// getProfileFields() is called at render time, never at module load.
 
 // Admin editor for job spec profiles. Each profile is a set of allow-lists
 // that narrow the catalog dropdowns per field. Leaving every box in a field
@@ -32,7 +33,7 @@ export function Profiles({ profiles, onChanged, flash }: {
   };
 
   const limitSummary = (p: SpecProfile) => {
-    const bits = PROFILE_FIELDS
+    const bits = getProfileFields()
       .filter(f => (p.limits?.[f.limitKey] || []).length)
       .map(f => `${f.label}: ${(p.limits[f.limitKey] as string[]).join(', ')}`);
     return bits.length ? bits.join(' · ') : 'No restrictions — full catalog';
@@ -122,7 +123,7 @@ function ProfileEditor({ profile, onDone, flash }: {
   const [notes, setNotes] = useState(profile?.notes || '');
   const [limits, setLimits] = useState<SpecProfileLimits>(() => {
     const l: SpecProfileLimits = {};
-    PROFILE_FIELDS.forEach(f => { l[f.limitKey] = [...(profile?.limits?.[f.limitKey] || [])]; });
+    getProfileFields().forEach(f => { l[f.limitKey] = [...(profile?.limits?.[f.limitKey] || [])]; });
     return l;
   });
   const [busy, setBusy] = useState(false);
@@ -145,7 +146,7 @@ function ProfileEditor({ profile, onDone, flash }: {
     if (!name.trim()) { flash('Profile name is required'); return; }
     // Absent key = unrestricted; strip empty lists before sending.
     const clean: SpecProfileLimits = {};
-    PROFILE_FIELDS.forEach(f => { const l = limits[f.limitKey]; if (l && l.length) clean[f.limitKey] = l; });
+    getProfileFields().forEach(f => { const l = limits[f.limitKey]; if (l && l.length) clean[f.limitKey] = l; });
     setBusy(true);
     try {
       if (profile) await api.putProfile(profile.id, { name, notes, limits: clean });
@@ -183,7 +184,7 @@ function ProfileEditor({ profile, onDone, flash }: {
             If exactly one option is checked, that field locks for foremen.
           </div>
         </div>
-        {PROFILE_FIELDS.map(f => {
+        {getProfileFields().map(f => {
           const cur = limits[f.limitKey] || [];
           return (
             <div key={f.limitKey} className="fieldblock">
