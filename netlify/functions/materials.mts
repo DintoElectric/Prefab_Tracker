@@ -1,4 +1,4 @@
-import { materialsStore, currentUser, ensureSeed, json, unauthorized, forbidden } from '../lib/store.mts';
+import { materialsStore, currentUser, ensureSeed, ensureMaterialSeed, json, unauthorized, forbidden } from '../lib/store.mts';
 
 const CLASSES = ['box', 'wire', 'conduit', 'other'];
 
@@ -6,6 +6,7 @@ export default async function handler(req: Request, context: any) {
   const user = await currentUser(req);
   if (!user) return unauthorized();
   await ensureSeed();
+  await ensureMaterialSeed();
   const store = materialsStore();
   const id = context?.params?.id as string | undefined;
 
@@ -27,13 +28,19 @@ export default async function handler(req: Request, context: any) {
     try { body = await req.json(); } catch { return json({ error: 'Bad request' }, 400); }
     const rows = Array.isArray(body.rows) ? body.rows : null;
     if (!rows) return json({ error: 'rows array required' }, 400);
-    const clean = rows.map((r: any) => ({
-      desc: String(r?.desc || ''),
-      mfg: String(r?.mfg || '').toUpperCase(),
-      cat: String(r?.cat || ''),
-      per: String(r?.per || ''),
-      cls: CLASSES.includes(r?.cls) ? r.cls : 'other'
-    }));
+    const clean = rows.map((r: any) => {
+      const row: any = {
+        desc: String(r?.desc || ''),
+        mfg: String(r?.mfg || '').toUpperCase(),
+        cat: String(r?.cat || ''),
+        per: String(r?.per || ''),
+        cls: CLASSES.includes(r?.cls) ? r.cls : 'other'
+      };
+      // Preserve a field-scaling hook if present (e.g. GFCI count on temp
+      // power carts). Only a non-empty string is kept.
+      if (typeof r?.perField === 'string' && r.perField.trim()) row.perField = r.perField.trim();
+      return row;
+    });
     await store.setJSON(id, clean);
     return json({ id, rows: clean });
   }
