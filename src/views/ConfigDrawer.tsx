@@ -123,6 +123,32 @@ export function ConfigDrawer({ assemblyId, profile, onAdd, onClose }: {
                       );
                     })}
                   </div>
+                ) : f.type === 'count' ? (
+                  <div className="stepper">
+                    <button type="button" aria-label={`Decrease ${f.label}`}
+                      onClick={() => setOpts(prev => {
+                        const cur = Number(prev[f.key] ?? f.def) || (f.min ?? 0);
+                        return { ...prev, [f.key]: String(Math.max(f.min ?? 0, cur - 1)) };
+                      })}>−</button>
+                    <input inputMode="numeric" aria-label={f.label} value={String(opts[f.key] ?? f.def)}
+                      onChange={e => {
+                        const raw = e.target.value.replace(/[^0-9]/g, '');
+                        setOpts(prev => ({ ...prev, [f.key]: raw }));
+                      }}
+                      onBlur={e => {
+                        // Clamp to [min,max] only when the field loses focus, so
+                        // mid-typing values aren't yanked around.
+                        let n = Number(e.target.value) || (f.min ?? 0);
+                        if (f.min !== undefined) n = Math.max(f.min, n);
+                        if (f.max !== undefined) n = Math.min(f.max, n);
+                        setOpts(prev => ({ ...prev, [f.key]: String(n) }));
+                      }} />
+                    <button type="button" aria-label={`Increase ${f.label}`}
+                      onClick={() => setOpts(prev => {
+                        const cur = Number(prev[f.key] ?? f.def) || (f.min ?? 0);
+                        return { ...prev, [f.key]: String(f.max !== undefined ? Math.min(f.max, cur + 1) : cur + 1) };
+                      })}>+</button>
+                  </div>
                 ) : (
                   <select className="input" value={String(opts[f.key] ?? '')} disabled={locked}
                     onChange={e => setOpts(prev => ({ ...prev, [f.key]: e.target.value }))}>
