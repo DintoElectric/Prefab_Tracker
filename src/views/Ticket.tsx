@@ -1,5 +1,5 @@
 import {
-  itemOf, sysColor, optSummary, fmtDate, weekLabel, pieces, resolveMfg, pullList,
+  itemOf, sysColor, optSummary, fmtDate, weekLabel, pieces, resolveMfg, pullList, rowPer,
   MFGS, CLASS_LABEL, type PrefabRequest, type MaterialRow
 } from '../data/model';
 import { Thumb, CodeStrip } from '../lib/ui';
@@ -32,7 +32,7 @@ export function Ticket({ req, tplFor, onBack, onSetMfg }: {
           </div>
         </div>
 
-      <div className="tk-meta">
+        <div className="tk-meta">
           <div><div className="tk-cap">Job name</div><div className="tk-val">{req.job}</div></div>
           <div><div className="tk-cap">Requested by</div><div className="tk-val">{req.by}</div></div>
           <div><div className="tk-cap">Date needed</div><div className="tk-val">{fmtDate(req.needBy)}</div></div>
@@ -88,6 +88,7 @@ export function Ticket({ req, tplFor, onBack, onSetMfg }: {
                       <tbody>
                         {tpl.map((row, ri) => {
                           const res = resolveMfg(l, row, ri);
+                          const per = rowPer(row, l.opts);
                           return (
                             <tr key={ri}>
                               <td>{row.desc}</td>
@@ -100,8 +101,8 @@ export function Ticket({ req, tplFor, onBack, onSetMfg }: {
                                 {res.src === 'shop' && <span className="mfg-flag shop">Substituted</span>}
                               </td>
                               <td className="mono">{row.cat}</td>
-                              <td>{row.per}</td>
-                              <td>{(Number(row.per) || 0) * l.qty}</td>
+                              <td>{row.perField ? `${per} (per cart)` : row.per}</td>
+                              <td>{per * l.qty}</td>
                             </tr>
                           );
                         })}
