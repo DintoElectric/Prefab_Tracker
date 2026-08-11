@@ -146,6 +146,17 @@ const SEED_BOM: Record<string, unknown[]> = {
     { desc: '3/4" EMT elbow, factory 90°', mfg: 'ALLIED', cat: '863040', per: '1', cls: 'conduit' },
     { desc: '3/4" EMT set screw connector, steel', mfg: 'BRIDGEPORT', cat: '251-DC2', per: '2', cls: 'box' },
     { desc: '3/4" plastic bushing', mfg: 'TOPAZ', cat: 'BP34', per: '2', cls: 'other' }
+  ],
+  // Temp power cart. Fixed structure counts once per cart; the GFCI duplex
+  // row scales with the 'gfci' config field (perField), 3–12 per cart.
+  'TP1': [
+    { desc: 'Rubbermaid utility cart', mfg: '', cat: '', per: '1', cls: 'other' },
+    { desc: 'Slotted strut, 6 ft', mfg: '', cat: '', per: '1', cls: 'other' },
+    { desc: 'Slotted strut foot', mfg: '', cat: '', per: '1', cls: 'other' },
+    { desc: 'L bracket (strut to cart shelf)', mfg: '', cat: '', per: '1', cls: 'other' },
+    { desc: 'Whip, 10 ft', mfg: '', cat: '', per: '1', cls: 'wire' },
+    { desc: 'Zip ties (one per foot of strut)', mfg: '', cat: '', per: '6', cls: 'other' },
+    { desc: 'GFCI duplex receptacle', mfg: '', cat: '', per: '1', cls: 'box', perField: 'gfci' }
   ]
 };
 
@@ -189,6 +200,22 @@ export async function nextRequestId(): Promise<string> {
   const n = Number(raw) || 1044;
   await cfg.set('seq', String(n + 1));
   return 'PR-' + n;
+}
+
+// Material templates added after a site was first seeded won't land through
+// ensureSeed (it short-circuits once seeded-v1 is set). This runs on the
+// materials GET and writes any missing seeded template without touching ones
+// the admin has since edited — so adding a new catalog item's template here
+// deploys it to existing sites, but never overwrites live edits.
+let matSeeded = false;
+export async function ensureMaterialSeed() {
+  if (matSeeded) return;
+  const ms = materialsStore();
+  for (const [id, rows] of Object.entries(SEED_BOM)) {
+    const exists = await ms.get(id);
+    if (!exists) await ms.setJSON(id, rows);
+  }
+  matSeeded = true;
 }
 
 // ── job spec profile seeding ──
