@@ -4,6 +4,7 @@ import {
   BEND_SIZES, BEND_MATERIALS, BEND_TYPES, OFFSET_ANGLES,
   type BendType, type ConduitSize, type BendMaterial
 } from '../data/bends';
+import { BendDiagram } from './BendDiagram';
 
 const num = (s: string) => {
   const n = parseFloat(s);
@@ -16,18 +17,22 @@ export function Bends() {
   const [material, setMaterial] = useState<BendMaterial>('EMT');
   const [angle, setAngle] = useState<number>(30);
   const [depth, setDepth] = useState('');
+  const [width, setWidth] = useState('');
   const [rise, setRise] = useState('');
   const [roll, setRoll] = useState('');
+  const [runAfter, setRunAfter] = useState('');
   const [stub, setStub] = useState('');
   const [start, setStart] = useState('');
+  const [notes, setNotes] = useState('');
 
   const input = {
     ...emptyInput(),
     type, size, material, angle,
-    depth: num(depth), rise: num(rise), roll: num(roll),
-    stubHeight: num(stub), startInches: num(start)
+    depth: num(depth), width: num(width), rise: num(rise), roll: num(roll),
+    runAfter: num(runAfter), stubHeight: num(stub), startInches: num(start), notes
   };
   const r = computeBend(input);
+  const showAngle = type === 'offset' || type === 'rolling' || type === 'saddle4' || type === 'kick';
 
   const numField = (label: string, value: string, set: (v: string) => void, hint?: string) => (
     <div className="fieldblock" style={{ flex: 1, minWidth: 150 }}>
@@ -77,17 +82,21 @@ export function Bends() {
 
       {/* type-specific inputs */}
       <div style={{ display: 'flex', gap: 12, marginTop: 18, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-        {type === 'offset' && numField('Offset depth (in)', depth, setDepth, 'How far the run steps over')}
-        {type === 'saddle3' && numField('Obstruction height (in)', depth, setDepth, 'How high the hump must clear')}
+        {(type === 'offset') && numField('Offset depth (in)', depth, setDepth, 'How far the run steps over')}
+        {(type === 'saddle3' || type === 'saddle4') && numField('Obstruction height (in)', depth, setDepth, 'How high the hump must clear')}
+        {type === 'saddle4' && numField('Obstruction width (in)', width, setWidth, 'Flat run across the top')}
         {type === 'rolling' && numField('Rise — up (in)', rise, setRise)}
         {type === 'rolling' && numField('Roll — over (in)', roll, setRoll)}
+        {type === 'kick' && numField('Kick mark from end (in)', start, setStart, 'Where the bend sits')}
+        {type === 'kick' && numField('Run past bend (in, optional)', runAfter, setRunAfter, 'Shows the rise gained')}
         {type === 'stub90' && numField('Finished stub height (in)', stub, setStub, 'End of pipe to back of stub')}
-        {(type === 'offset' || type === 'saddle3') &&
-          numField(type === 'saddle3' ? 'Center from end (in, optional)' : 'First mark from end (in, optional)', start, setStart, 'Leave blank for relative marks')}
+        {type === 'offset' && numField('First mark from end (in, optional)', start, setStart, 'Leave blank for relative marks')}
+        {type === 'saddle3' && numField('Center from end (in, optional)', start, setStart, 'Leave blank for relative marks')}
+        {type === 'saddle4' && numField('First bend from end (in, optional)', start, setStart, 'Leave blank for relative marks')}
       </div>
 
-      {/* angle (offset / rolling) */}
-      {(type === 'offset' || type === 'rolling') && (
+      {/* angle */}
+      {showAngle && (
         <div className="fieldblock" style={{ marginTop: 18 }}>
           <div className="lblrow"><span className="lbl">Bend angle</span></div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -98,8 +107,25 @@ export function Bends() {
         </div>
       )}
 
-      {/* results */}
+      {/* custom notes for prefab */}
+      <div className="fieldblock" style={{ marginTop: 18 }}>
+        <div className="lblrow"><span className="lbl">Notes for prefab (optional)</span></div>
+        <textarea className="input" rows={2} placeholder="Describe anything the calculator can't cover — odd angles, field conditions, which run this is for."
+          value={notes} onChange={e => setNotes(e.target.value)} style={{ fontSize: 14, width: '100%' }} />
+      </div>
+
+      {/* to-scale sketch */}
       <div style={{ marginTop: 24, background: '#fff', border: '2px solid var(--color-divider)' }}>
+        <div style={{ padding: '12px 18px', borderBottom: '1px solid var(--color-neutral-300)' }}>
+          <div className="page-cap">Sketch — to scale</div>
+        </div>
+        <div style={{ padding: 12 }}>
+          <BendDiagram input={input} />
+        </div>
+      </div>
+
+      {/* results */}
+      <div style={{ marginTop: 18, background: '#fff', border: '2px solid var(--color-divider)' }}>
         <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--color-neutral-300)' }}>
           <div className="page-cap" style={{ marginBottom: 6 }}>Result</div>
           <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 18 }}>{r.headline}</div>
