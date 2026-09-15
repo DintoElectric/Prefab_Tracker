@@ -16,6 +16,8 @@ export function Bends() {
   const [size, setSize] = useState<ConduitSize>('3/4');
   const [material, setMaterial] = useState<BendMaterial>('EMT');
   const [angle, setAngle] = useState<number>(30);
+  const [custom, setCustom] = useState(false);
+  const [customAngle, setCustomAngle] = useState('');
   const [depth, setDepth] = useState('');
   const [width, setWidth] = useState('');
   const [rise, setRise] = useState('');
@@ -25,9 +27,12 @@ export function Bends() {
   const [start, setStart] = useState('');
   const [notes, setNotes] = useState('');
 
+  const rawCustom = num(customAngle);
+  const effectiveAngle = custom ? (rawCustom > 0 ? Math.min(rawCustom, 90) : angle) : angle;
+
   const input = {
     ...emptyInput(),
-    type, size, material, angle,
+    type, size, material, angle: effectiveAngle,
     depth: num(depth), width: num(width), rise: num(rise), roll: num(roll),
     runAfter: num(runAfter), stubHeight: num(stub), startInches: num(start), notes
   };
@@ -99,10 +104,20 @@ export function Bends() {
       {showAngle && (
         <div className="fieldblock" style={{ marginTop: 18 }}>
           <div className="lblrow"><span className="lbl">Bend angle</span></div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             {OFFSET_ANGLES.map(a => (
-              <button key={a} className={'chip' + (angle === a ? ' sel' : '')} onClick={() => setAngle(a)}>{a}°</button>
+              <button key={a} className={'chip' + (!custom && angle === a ? ' sel' : '')}
+                onClick={() => { setCustom(false); setAngle(a); }}>{a}°</button>
             ))}
+            <button className={'chip' + (custom ? ' sel' : '')} onClick={() => setCustom(true)}>Custom</button>
+            {custom && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <input className="input" inputMode="decimal" placeholder="deg" autoFocus
+                  value={customAngle} onChange={e => setCustomAngle(e.target.value.replace(/[^0-9.]/g, ''))}
+                  style={{ height: 44, width: 90, fontSize: 15, textAlign: 'center' }} />
+                <span style={{ fontSize: 13, color: 'var(--color-neutral-600)' }}>° (1–90)</span>
+              </span>
+            )}
           </div>
         </div>
       )}
