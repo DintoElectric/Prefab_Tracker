@@ -7,12 +7,15 @@
 // ONE number (used for every circuit in the box, like the paper sheet) or ONE
 // PER CIRCUIT in the same order the circuits are listed — "205" or
 // "205, 200, 195, 190". Each circuit is its own wire, and its color comes from
-// its circuit number.
+// its circuit number. A circuit can also be marked as carrying a NEUTRAL: that
+// adds a second wire of the same length in the system's neutral color (white on
+// 208Y/120, gray on 480Y/277), listed in its own line of the box's report.
 //
 // Phase colors follow the Yale Design Standard, Division 26 05 00 (Conductors
 // and Cables), section G.1:
-//   208Y/120 V  — black A, red B, blue C
-//   480Y/277 V  — brown A, orange B, yellow C   (480 V 3-wire is the same)
+//   208Y/120 V  — black A, red B, blue C, white neutral
+//   480Y/277 V  — brown A, orange B, yellow C, gray neutral
+//   (480 V 3-wire uses the same phase colors and simply has no neutral)
 //
 // A panel's breaker positions run down two columns (odd left, even right) and
 // each PAIR of positions shares a phase, cycling A-B-C every six positions:
@@ -44,7 +47,9 @@ export const WIRE_COLORS: Record<string, WireColor> = {
   blue:   { key: 'blue',   label: 'Blue',   short: 'BLU', hex: '#1f5fbf', ink: '#ffffff' },
   brown:  { key: 'brown',  label: 'Brown',  short: 'BRN', hex: '#6b4423', ink: '#ffffff' },
   orange: { key: 'orange', label: 'Orange', short: 'ORG', hex: '#ee8a0c', ink: '#201e1d' },
-  yellow: { key: 'yellow', label: 'Yellow', short: 'YEL', hex: '#f5cf1e', ink: '#201e1d' }
+  yellow: { key: 'yellow', label: 'Yellow', short: 'YEL', hex: '#f5cf1e', ink: '#201e1d' },
+  white:  { key: 'white',  label: 'White',  short: 'WHT', hex: '#ffffff', ink: '#201e1d' },
+  gray:   { key: 'gray',   label: 'Gray',   short: 'GRY', hex: '#8b9098', ink: '#201e1d' }
 };
 
 export interface SystemDef {
@@ -52,10 +57,11 @@ export interface SystemDef {
   label: string;
   blurb: string;
   phases: [string, string, string]; // color keys for phase A, B, C
+  neutral: string;                  // color key for the neutral
 }
 export const SYSTEMS: SystemDef[] = [
-  { v: '208Y/120', label: '208Y/120 V', blurb: 'Black · Red · Blue', phases: ['black', 'red', 'blue'] },
-  { v: '480Y/277', label: '480Y/277 V or 480 V', blurb: 'Brown · Orange · Yellow', phases: ['brown', 'orange', 'yellow'] }
+  { v: '208Y/120', label: '208Y/120 V', blurb: 'Black · Red · Blue — white neutral', phases: ['black', 'red', 'blue'], neutral: 'white' },
+  { v: '480Y/277', label: '480Y/277 V or 480 V', blurb: 'Brown · Orange · Yellow — gray neutral', phases: ['brown', 'orange', 'yellow'], neutral: 'gray' }
 ];
 export const DEFAULT_SYSTEM: VoltageSystem = '208Y/120';
 export const systemDef = (v: string): SystemDef => SYSTEMS.find(s => s.v === v) || SYSTEMS[0];
@@ -99,6 +105,7 @@ export function parseFootages(text: string): { footages: number[]; bad: string[]
 export interface Wire {
   circuit: number;
   footage: number | null;  // null = not measured yet; nothing to cut for it
+  neutral: boolean;        // this circuit also carries a neutral (same length, neutral color)
 }
 export interface BoxRow {
   box: string;             // box number as written: '39', '12A'
@@ -107,10 +114,11 @@ export interface BoxRow {
 
 // One footage typed → every wire gets it. A list → one per circuit, in order.
 // None → not measured. (checkBoxRows has already rejected any other count.)
-export function wiresFor(circuits: number[], footages: number[]): Wire[] {
+export function wiresFor(circuits: number[], footages: number[], neutrals: number[] = []): Wire[] {
   return circuits.map((circuit, i) => ({
     circuit,
-    footage: footages.length === 0 ? null : footages.length === 1 ? footages[0] : (footages[i] ?? null)
+    footage: footages.length === 0 ? null : footages.length === 1 ? footages[0] : (footages[i] ?? null),
+    neutral: neutrals.includes(circuit)
   }));
 }
 
@@ -159,24 +167,28 @@ export function checkBoxRows(rows: BoxInput[]): (string | null)[] {
 }
 
 // ── the report Harry cuts from ──
-// Per box, per color: which wires, how many, how many feet.
+// Per box, per color: which wires, how many, how many feet. Each box has up to
+// four lines — the three phase colors plus the neutral — and only the ones in
+// use are listed.
 export interface ColorGroup {
   color: WireColor;
-  phase: 'A' | 'B' | 'C';
+  phase: 'A' | 'B' | 'C' | 'N';
+  kind: 'hot' | 'neutral';
   wires: Wire[];          // every wire of this color in the box, in listed order
   feet: number;           // combined footage of the measured ones
   unmeasured: number;     // wires here with no footage yet
 }
 export interface BoxReport {
   box: string;
-  groups: ColorGroup[];   // phase order A, B, C — only colors that appear
-  wires: number;
+  groups: ColorGroup[];   // A, B, C, then neutral — only lines that are in use
+  wires: number;          // total conductors in the box (hots + neutrals)
   feet: number;
   unmeasured: number;
 }
 export interface ColorTotal {
   color: WireColor;
-  phase: 'A' | 'B' | 'C';
+  phase: 'A' | 'B' | 'C' | 'N';
+  kind: 'hot' | 'neutral';
   wires: number;
   feet: number;
   unmeasured: number;
@@ -191,27 +203,30 @@ export interface SheetReport {
 
 export function buildReport(rows: BoxRow[], system: VoltageSystem): SheetReport {
   const def = systemDef(system);
-  const colorOf = (i: number) => WIRE_COLORS[def.phases[i]];
-  const totals: ColorTotal[] = [0, 1, 2].map(i => ({
-    color: colorOf(i), phase: PHASE_LETTERS[i], wires: 0, feet: 0, unmeasured: 0
-  }));
+  const slots = [
+    ...[0, 1, 2].map(i => ({ color: WIRE_COLORS[def.phases[i]], phase: PHASE_LETTERS[i] as 'A' | 'B' | 'C' | 'N', kind: 'hot' as const })),
+    { color: WIRE_COLORS[def.neutral], phase: 'N' as 'A' | 'B' | 'C' | 'N', kind: 'neutral' as const }
+  ];
+  const NEUTRAL = 3;
+  const totals: ColorTotal[] = slots.map(sl => ({ ...sl, wires: 0, feet: 0, unmeasured: 0 }));
 
   const boxes: BoxReport[] = rows.map(r => {
-    const groups: ColorGroup[] = [0, 1, 2].map(i => ({
-      color: colorOf(i), phase: PHASE_LETTERS[i], wires: [], feet: 0, unmeasured: 0
-    }));
+    const groups: ColorGroup[] = slots.map(sl => ({ ...sl, wires: [], feet: 0, unmeasured: 0 }));
+    const add = (slot: number, w: Wire) => {
+      groups[slot].wires.push(w);
+      totals[slot].wires += 1;
+      if (w.footage === null) { groups[slot].unmeasured += 1; totals[slot].unmeasured += 1; }
+      else { groups[slot].feet += w.footage; totals[slot].feet += w.footage; }
+    };
     for (const w of r.wires) {
-      const i = phaseIndex(w.circuit);
-      groups[i].wires.push(w);
-      totals[i].wires += 1;
-      if (w.footage === null) { groups[i].unmeasured += 1; totals[i].unmeasured += 1; }
-      else { groups[i].feet += w.footage; totals[i].feet += w.footage; }
+      add(phaseIndex(w.circuit), w);
+      if (w.neutral) add(NEUTRAL, w);
     }
     const used = groups.filter(g => g.wires.length);
     return {
       box: r.box,
       groups: used,
-      wires: r.wires.length,
+      wires: used.reduce((n, g) => n + g.wires.length, 0),
       feet: used.reduce((n, g) => n + g.feet, 0),
       unmeasured: used.reduce((n, g) => n + g.unmeasured, 0)
     };
@@ -229,6 +244,31 @@ export function buildReport(rows: BoxRow[], system: VoltageSystem): SheetReport 
 
 export const fmtFeet = (n: number) => `${n.toLocaleString('en-US')} ft`;
 
+// ── attached panel schedules ──
+// Foremen attach the panel schedule so prefab can see which circuits are 1-, 2-
+// and 3-pole. PDF or photo, a few per sheet, kept small so uploads stay quick
+// on a phone and fit inside a Netlify function request.
+export interface FileMeta {
+  id: string;
+  name: string;
+  type: 'application/pdf' | 'image/png' | 'image/jpeg';
+  size: number;
+}
+export const MAX_FILE_BYTES = 4 * 1024 * 1024;
+export const MAX_FILES = 3;
+export const FILE_ACCEPT = 'application/pdf,image/png,image/jpeg,image/*';
+
+// Decide a file's real type from its first bytes, not from its name or what
+// the browser claimed — so only genuine PDFs and PNG/JPEG photos are stored.
+export function sniffFileType(b: Uint8Array): FileMeta['type'] | null {
+  if (b.length >= 5 && b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46 && b[4] === 0x2d) return 'application/pdf';
+  if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 && b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a) return 'image/png';
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  return null;
+}
+export const cleanFileName = (raw: string): string =>
+  (raw.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_').trim().slice(0, 100)) || 'panel-schedule';
+
 // ── the record stored by the function ──
 export interface WirePullSheet {
   id: string;          // 'WP-1001'
@@ -242,6 +282,7 @@ export interface WirePullSheet {
   notes: string;
   status: WirePullStatus;
   boxes: BoxRow[];
+  files?: FileMeta[];  // attached panel schedules (absent on older sheets)
   createdAt: string;
 }
 
@@ -270,10 +311,12 @@ export function cleanSheetInput(body: any): CleanSheet {
   if (body.boxes.length > MAX_BOXES) return { ok: false, error: 'Too many boxes on one sheet' };
 
   const inputs: BoxInput[] = [];
+  const neutralsByRow: number[][] = [];
   for (const raw of body.boxes) {
     const box = String(raw?.box ?? '').trim().slice(0, 20);
     const wires: any[] = Array.isArray(raw?.wires) ? raw.wires : [];
     const circuits = wires.map(w => Number(w?.circuit));
+    const neutrals = wires.filter(w => w?.neutral === true).map(w => Number(w.circuit));
     if (circuits.some(c => !Number.isInteger(c))) return { ok: false, error: 'Circuits must be whole numbers' };
     const given = wires.map(w => (w?.footage === null || w?.footage === undefined ? null : Number(w.footage)));
     const measured = given.filter(f => f !== null) as number[];
@@ -282,6 +325,7 @@ export function cleanSheetInput(body: any): CleanSheet {
     }
     if (measured.some(f => !Number.isInteger(f))) return { ok: false, error: 'Footage must be whole feet' };
     inputs.push({ box, circuits, bad: [], footages: measured, footageBad: [] });
+    neutralsByRow.push(neutrals);
   }
 
   const problems = checkBoxRows(inputs);
@@ -294,6 +338,6 @@ export function cleanSheetInput(body: any): CleanSheet {
   // empty row in it is malformed — the screen never sends one.
   if (inputs.some(i => !i.box && !i.circuits.length)) return { ok: false, error: 'Empty box row' };
 
-  const boxes: BoxRow[] = inputs.map(i => ({ box: i.box, wires: wiresFor(i.circuits, i.footages) }));
+  const boxes: BoxRow[] = inputs.map((i, n) => ({ box: i.box, wires: wiresFor(i.circuits, i.footages, neutralsByRow[n]) }));
   return { ok: true, value: { job, floor, panel, system, needBy, priority, notes, boxes } };
 }

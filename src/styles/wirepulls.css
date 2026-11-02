@@ -90,3 +90,22 @@
 .wp-run { display: inline-flex; align-items: baseline; gap: 6px; margin: 0 6px 5px 0; padding: 3px 9px; border: 1px solid var(--color-neutral-400); background: #fff; font-size: 12.5px; white-space: nowrap; }
 .wp-run b { font-family: var(--font-heading); font-weight: 800; font-size: 14px; }
 .wp-run.none { border-color: var(--color-accent-300); background: var(--color-accent-100); color: var(--color-accent-700); font-weight: 700; }
+
+/* neutral checkbox on each circuit chip */
+.wp-circ-field .wp-chip .nbox { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; height: 26px; border: 1px solid currentColor; font-size: 11px; font-weight: 800; letter-spacing: .04em; cursor: pointer; opacity: .95; }
+.wp-circ-field .wp-chip .nbox input { width: 18px; height: 18px; margin: 0; cursor: pointer; accent-color: #fff; }
+.wp-neu { color: var(--color-neutral-600); font-weight: 600; font-size: 12px; }
+
+/* attached panel schedules */
+.wp-attach { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.wp-attach .btn { cursor: pointer; }
+.wp-hint-inline { font-size: 12px; color: var(--color-neutral-600); }
+.wp-file { display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px; border: 1px solid var(--color-neutral-400); background: #fff; font-size: 12.5px; font-weight: 600; }
+.wp-file a { color: var(--color-accent-700); text-decoration: underline; }
+.wp-file small { color: var(--color-neutral-600); font-weight: 400; }
+.wp-file button { all: unset; cursor: pointer; width: 22px; height: 22px; text-align: center; line-height: 22px; color: var(--color-neutral-600); }
+.wp-file button:hover { color: var(--color-accent-700); }
+.wp-files { padding: 10px 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border-bottom: 1px solid var(--color-neutral-300); }
+.wp-files .k { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--color-neutral-600); margin-right: 4px; }
+.wp-sched-wrap { padding: 14px 18px; border-bottom: 1px solid var(--color-neutral-300); background: var(--color-neutral-100); }
+.wp-sched-img { display: block; max-width: 100%; height: auto; border: 1px solid var(--color-neutral-300); background: #fff; }

@@ -3,9 +3,9 @@ import { fmtDate, type SessionUser } from '../data/model';
 import { StatusTag, PrioTag } from '../lib/ui';
 import { api } from '../lib/api';
 import {
-  SYSTEMS, DEFAULT_SYSTEM, MAX_CIRCUIT, WP_STATUSES,
+  SYSTEMS, DEFAULT_SYSTEM, MAX_CIRCUIT, MAX_FILES, MAX_FILE_BYTES, FILE_ACCEPT, WP_STATUSES, WIRE_COLORS,
   systemDef, phaseColor, parseCircuits, parseFootages, wiresFor, checkBoxRows, buildReport, fmtFeet,
-  type VoltageSystem, type BoxRow, type BoxInput, type WirePullSheet, type SheetReport, type WireColor
+  type VoltageSystem, type BoxRow, type BoxInput, type WirePullSheet, type SheetReport, type WireColor, type FileMeta
 } from '../data/wirepulls';
 import '../styles/wirepulls.css';
 
@@ -45,7 +45,7 @@ function ReportTable({ report }: { report: SheetReport }) {
                 <div className="s">{b.feet ? fmtFeet(b.feet) : 'no footage yet'}</div>
               </td>
             )}
-            <td><Swatch color={g.color} />{g.color.label}</td>
+            <td><Swatch color={g.color} />{g.color.label}{g.kind === 'neutral' && <span className="wp-neu"> · neutral</span>}</td>
             <td className="circs">
               {g.wires.map((w, i) => (
                 <span key={i} className={'wp-run' + (w.footage === null ? ' none' : '')}>
@@ -76,7 +76,7 @@ function TotalsTable({ report }: { report: SheetReport }) {
       <tbody>
         {report.totals.map(t => (
           <tr key={t.phase}>
-            <td><Swatch color={t.color} />{t.color.label}</td>
+            <td><Swatch color={t.color} />{t.color.label}{t.kind === 'neutral' && <span className="wp-neu"> · neutral</span>}</td>
             <td className="num">{t.wires}</td>
             <td className="num">{t.feet ? fmtFeet(t.feet) : '—'}</td>
           </tr>
@@ -91,6 +91,50 @@ function TotalsTable({ report }: { report: SheetReport }) {
   );
 }
 
+// ───────────────────────── panel schedule files ─────────────────────────
+
+const isPdf = (f: { type: string; name: string }) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+const isPhoto = (f: { type: string }) => f.type.startsWith('image/');
+const fmtSize = (n: number) => n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+
+// Phone photos are big. Shrink anything over ~1.5 MB to a readable JPEG before
+// it goes up; if the browser can't (or it's already small), send it as is.
+async function prepareImage(file: File): Promise<File | null> {
+  const plain = file.type === 'image/jpeg' || file.type === 'image/png';
+  if (plain && file.size <= 1.5 * 1024 * 1024) return file;
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 2800 / Math.max(bmp.width, bmp.height));
+    const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('no canvas');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(bmp, 0, 0, w, h);
+    const blob: Blob | null = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.85));
+    if (!blob) throw new Error('encode failed');
+    return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+  } catch {
+    return plain ? file : null; // e.g. a HEIC the browser can't read
+  }
+}
+
+// Check what the person picked and return the files that are fine to send.
+async function pickScheduleFiles(list: FileList | null, already: number, flash: (m: string) => void): Promise<File[]> {
+  const out: File[] = [];
+  for (const raw of Array.from(list || [])) {
+    if (already + out.length >= MAX_FILES) { flash(`Up to ${MAX_FILES} panel schedules per sheet`); break; }
+    let f: File | null = raw;
+    if (isPhoto(raw)) f = await prepareImage(raw);
+    else if (!isPdf(raw)) f = null;
+    if (!f) { flash(`${raw.name}: attach a PDF, or a JPEG/PNG photo`); continue; }
+    if (f.size > MAX_FILE_BYTES) { flash(`${raw.name} is over 4 MB — send a smaller photo or PDF`); continue; }
+    out.push(f);
+  }
+  return out;
+}
+
 // ───────────────────────── circuits field ─────────────────────────
 //
 // Type 3 then a comma (or space, period, Enter, or just tap away) and the 3
@@ -99,8 +143,9 @@ function TotalsTable({ report }: { report: SheetReport }) {
 // The value stays a plain string ("3, 4, 9, 14") so drafts and the checker
 // work on exactly what's on screen.
 
-function CircuitsField({ value, onChange, system, label }: {
+function CircuitsField({ value, onChange, system, label, neutrals, onToggleNeutral }: {
   value: string; onChange: (v: string) => void; system: VoltageSystem; label: string;
+  neutrals: number[]; onToggleNeutral: (circuit: number) => void;
 }) {
   const [pending, setPending] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -124,6 +169,7 @@ function CircuitsField({ value, onChange, system, label }: {
     if (done.length) onChange(join([...tokens, ...done]));
   };
 
+  const neutralColor = WIRE_COLORS[systemDef(system).neutral];
   const pendingNum = pending ? parseInt(pending, 10) : 0;
   const live = pending ? colorFor(pendingNum, system) : null;
 
@@ -131,10 +177,18 @@ function CircuitsField({ value, onChange, system, label }: {
     <div className="wp-circ-field" onClick={() => inputRef.current?.focus()}>
       {tokens.map((c, i) => {
         const col = colorFor(c, system);
+        const hasN = neutrals.includes(c);
         return (
-          <span key={i} className="wp-chip" style={{ background: col.hex, color: col.ink }} title={col.label}>
+          <span key={i} className={'wp-chip' + (hasN ? ' neu' : '')}
+            style={{ background: col.hex, color: col.ink, boxShadow: hasN ? `inset 0 -6px 0 ${neutralColor.hex}` : undefined }}
+            title={col.label}>
             <span className="n">{c}</span>
             <span className="ph">{col.short}</span>
+            <label className="nbox" title={`Also pull a ${neutralColor.label.toLowerCase()} neutral for circuit ${c}`}
+              onClick={e => e.stopPropagation()}>
+              <input type="checkbox" checked={hasN} onChange={() => onToggleNeutral(c)}
+                aria-label={`Circuit ${c} neutral`} />N
+            </label>
             <button type="button" className="x" aria-label={`Remove circuit ${c}`}
               onClick={e => { e.stopPropagation(); onChange(join(tokens.filter((_, j) => j !== i))); }}>×</button>
           </span>
@@ -162,8 +216,8 @@ function CircuitsField({ value, onChange, system, label }: {
 
 // ───────────────────────── foreman sheet ─────────────────────────
 
-interface BoxDraft { box: string; circuits: string; footage: string; }
-const blankRow = (): BoxDraft => ({ box: '', circuits: '', footage: '' });
+interface BoxDraft { box: string; circuits: string; footage: string; neutrals: number[]; }
+const blankRow = (): BoxDraft => ({ box: '', circuits: '', footage: '', neutrals: [] });
 const isBlank = (r: BoxDraft) => !r.box.trim() && !r.circuits.trim() && !r.footage.trim();
 const withTrailingBlank = (rows: BoxDraft[]): BoxDraft[] =>
   rows.length && isBlank(rows[rows.length - 1]) ? rows : [...rows, blankRow()];
@@ -188,7 +242,8 @@ function loadDraft(username: string): Draft {
     if (mine && typeof mine === 'object' && Array.isArray(mine.rows)) {
       const d = { ...emptyDraft(), ...mine } as Draft;
       d.rows = withTrailingBlank(d.rows.map((r: any) => ({
-        box: String(r?.box ?? ''), circuits: String(r?.circuits ?? ''), footage: String(r?.footage ?? '')
+        box: String(r?.box ?? ''), circuits: String(r?.circuits ?? ''), footage: String(r?.footage ?? ''),
+        neutrals: Array.isArray(r?.neutrals) ? r.neutrals.filter((n: unknown) => Number.isInteger(n)) : []
       })));
       return d;
     }
@@ -209,6 +264,8 @@ function SheetForm({ user, flash, onSubmitted }: {
   const [draft, setDraftState] = useState<Draft>(() => loadDraft(user.username));
   const [busy, setBusy] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  // Attachments can't live in localStorage, so they only last while the sheet is open.
+  const [files, setFiles] = useState<File[]>([]);
 
   const setDraft = (d: Draft) => { setDraftState(d); saveDraft(user.username, d); };
   const patch = (p: Partial<Draft>) => setDraft({ ...draft, ...p });
@@ -227,7 +284,7 @@ function SheetForm({ user, flash, onSubmitted }: {
     const valid: BoxRow[] = [];
     draft.rows.forEach((r, i) => {
       if (isBlank(r) || problems[i] !== null) return;
-      valid.push({ box: r.box.trim(), wires: wiresFor(parsed[i].circuits, parsed[i].footages) });
+      valid.push({ box: r.box.trim(), wires: wiresFor(parsed[i].circuits, parsed[i].footages, r.neutrals) });
     });
     return { parsed, problems, valid, report: buildReport(valid, draft.system) };
   }, [draft]);
@@ -249,7 +306,15 @@ function SheetForm({ user, flash, onSubmitted }: {
       // Foremen usually send several panels for one job, so keep the job-level
       // fields and clear only what belongs to this panel.
       setDraft({ ...draft, panel: '', notes: '', rows: emptyDraft().rows });
-      flash(`${sheet.id} submitted to prefab`);
+      // Panel schedules go up one at a time now that the sheet has a number.
+      let failed = 0;
+      for (const f of files) {
+        try { await api.uploadWirePullFile(sheet.id, f); } catch { failed++; }
+      }
+      setFiles([]);
+      flash(failed
+        ? `${sheet.id} submitted, but ${failed} panel schedule${failed === 1 ? '' : 's'} didn't upload — open the sheet to add ${failed === 1 ? 'it' : 'them'} again`
+        : `${sheet.id} submitted to prefab`);
       onSubmitted();
     } catch (e: any) {
       flash(e.message || 'Submit failed');
@@ -317,6 +382,27 @@ function SheetForm({ user, flash, onSubmitted }: {
           <textarea id="wp-notes" className="input" rows={2} placeholder="Label each wire with its circuit number."
             value={draft.notes} onChange={e => patch({ notes: e.target.value })} />
         </div>
+        <div className="wp-cell full">
+          <span className="wp-lbl">Panel schedule (optional)</span>
+          <div className="wp-attach">
+            <label className="btn btn-secondary btn-sm">
+              {files.length ? 'Add another' : 'Attach panel schedule'}
+              <input type="file" hidden multiple accept={FILE_ACCEPT} aria-label="Attach panel schedule"
+                onChange={async e => {
+                  const picked = await pickScheduleFiles(e.target.files, files.length, flash);
+                  e.target.value = '';
+                  if (picked.length) setFiles(prev => [...prev, ...picked]);
+                }} />
+            </label>
+            {files.map((f, i) => (
+              <span key={i} className="wp-file">
+                {f.name} <small>{fmtSize(f.size)}</small>
+                <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}>✕</button>
+              </span>
+            ))}
+            {!files.length && <span className="wp-hint-inline">So prefab can see which circuits are 1-, 2- or 3-pole. PDF or photo, up to {MAX_FILES}.</span>}
+          </div>
+        </div>
       </div>
 
       <div className="wp-tbl-scroll">
@@ -348,7 +434,10 @@ function SheetForm({ user, flash, onSubmitted }: {
                   </td>
                   <td className="cx">
                     <CircuitsField label={`Row ${i + 1} circuits`} system={draft.system} value={r.circuits}
-                      onChange={v => setRow(i, { circuits: v })} />
+                      neutrals={r.neutrals}
+                      // a circuit that's been removed forgets its neutral, so retyping it starts unchecked
+                      onChange={v => setRow(i, { circuits: v, neutrals: r.neutrals.filter(n => parseCircuits(v).circuits.includes(n)) })}
+                      onToggleNeutral={c => setRow(i, { neutrals: r.neutrals.includes(c) ? r.neutrals.filter(n => n !== c) : [...r.neutrals, c] })} />
                     {why && <div className="why">{why}</div>}
                   </td>
                   <td className="fx">
@@ -373,8 +462,9 @@ function SheetForm({ user, flash, onSubmitted }: {
         </table>
       </div>
       <div className="wp-hint-row">
-        Type a circuit and press comma, space or Enter — it turns into its wire color. Footage: one number
-        covers every circuit in that box, or give one per circuit in the same order (205, 200, 195).
+        Type a circuit and press comma, space or Enter — it turns into its wire color. Tick <strong>N</strong> on a
+        circuit that also needs a neutral. Footage: one number covers every circuit in that box, or give one per
+        circuit in the same order (205, 200, 195).
       </div>
 
       <div className="wp-card">
@@ -406,9 +496,63 @@ function SheetForm({ user, flash, onSubmitted }: {
 
 // ───────────────────────── prefab list ─────────────────────────
 
-function SheetCard({ sheet, canWork, isAdmin, startOpen, onAdvance, onDelete, onPrint }: {
-  sheet: WirePullSheet; canWork: boolean; isAdmin: boolean; startOpen: boolean;
+function ScheduleFiles({ sheet, canAttach, flash, onChanged, showImages }: {
+  sheet: WirePullSheet; canAttach: boolean; flash: (m: string) => void;
+  onChanged: (s: WirePullSheet) => void; showImages: boolean;
+}) {
+  const files: FileMeta[] = sheet.files || [];
+  const [busy, setBusy] = useState(false);
+  if (!files.length && !canAttach) return null;
+
+  const add = async (list: FileList | null) => {
+    setBusy(true);
+    try {
+      const picked = await pickScheduleFiles(list, files.length, flash);
+      for (const f of picked) {
+        try { const { sheet: next } = await api.uploadWirePullFile(sheet.id, f); onChanged(next); }
+        catch (e: any) { flash(e.message || 'Upload failed'); }
+      }
+    } finally { setBusy(false); }
+  };
+  const remove = async (fileId: string) => {
+    try { const { sheet: next } = await api.deleteWirePullFile(sheet.id, fileId); onChanged(next); }
+    catch (e: any) { flash(e.message || 'Could not remove that file'); }
+  };
+
+  return (
+    <>
+      <div className="wp-files">
+        <span className="k">Panel schedule</span>
+        {!files.length && <span className="wp-hint-inline">None attached</span>}
+        {files.map(f => (
+          <span key={f.id} className="wp-file">
+            <a href={api.wirePullFileUrl(sheet.id, f.id)} target="_blank" rel="noopener noreferrer">{f.name}</a>
+            <small>{fmtSize(f.size)}</small>
+            {canAttach && <button type="button" className="noprint" aria-label={`Remove ${f.name}`} onClick={() => remove(f.id)}>✕</button>}
+          </span>
+        ))}
+        {canAttach && files.length < MAX_FILES && (
+          <label className="btn btn-secondary btn-sm noprint">
+            {busy ? 'Uploading…' : files.length ? 'Add another' : 'Add panel schedule'}
+            <input type="file" hidden multiple accept={FILE_ACCEPT} aria-label="Add panel schedule" disabled={busy}
+              onChange={e => { const input = e.target; add(input.files).then(() => { input.value = ''; }); }} />
+          </label>
+        )}
+      </div>
+      {showImages && files.filter(f => f.type.startsWith('image/')).map(f => (
+        <div key={f.id} className="wp-sched-wrap">
+          <img className="wp-sched-img" src={api.wirePullFileUrl(sheet.id, f.id)} alt={`Panel schedule: ${f.name}`} />
+        </div>
+      ))}
+    </>
+  );
+}
+
+function SheetCard({ sheet, canWork, canAttach, isAdmin, startOpen, flash, onAdvance, onDelete, onPrint, onChanged }: {
+  sheet: WirePullSheet; canWork: boolean; canAttach: boolean; isAdmin: boolean; startOpen: boolean;
+  flash: (m: string) => void;
   onAdvance: (id: string) => void; onDelete: (id: string) => void; onPrint: (id: string) => void;
+  onChanged: (s: WirePullSheet) => void;
 }) {
   const [open, setOpen] = useState(startOpen);
   const [confirmDel, setConfirmDel] = useState(false);
@@ -433,6 +577,8 @@ function SheetCard({ sheet, canWork, isAdmin, startOpen, onAdvance, onDelete, on
         <div><div className="k">Wires</div><div className="v">{report.wires}</div></div>
         <div><div className="k">Total wire</div><div className="v">{fmtFeet(report.feet)}</div></div>
       </div>
+
+      <ScheduleFiles sheet={sheet} canAttach={canAttach} flash={flash} onChanged={onChanged} showImages={open} />
 
       {open && (
         <div className="wp-card">
@@ -569,9 +715,10 @@ export function WirePulls({ user, flash }: { user: SessionUser; flash: (m: strin
             </div>
           )}
           {shown.map(s => (
-            <SheetCard key={s.id} sheet={s} canWork={canWork} isAdmin={isAdmin}
-              startOpen={printId === s.id}
-              onAdvance={advance} onDelete={remove} onPrint={setPrintId} />
+            <SheetCard key={s.id} sheet={s} canWork={canWork} canAttach={user.role !== 'prefab'} isAdmin={isAdmin}
+              startOpen={printId === s.id} flash={flash}
+              onAdvance={advance} onDelete={remove} onPrint={setPrintId}
+              onChanged={next => setSheets(prev => prev.map(x => x.id === next.id ? next : x))} />
           ))}
         </>
       )}

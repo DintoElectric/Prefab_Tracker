@@ -61,5 +61,23 @@ export const api = {
   }) => call<{ sheet: WirePullSheet }>('/api/wirepulls', { method: 'POST', body: JSON.stringify(payload) }),
   patchWirePull: (id: string, body: { status: string }) =>
     call<{ sheet: WirePullSheet }>(`/api/wirepulls/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
-  deleteWirePull: (id: string) => call<{ ok: true }>(`/api/wirepulls/${id}`, { method: 'DELETE' })
+  deleteWirePull: (id: string) => call<{ ok: true }>(`/api/wirepulls/${id}`, { method: 'DELETE' }),
+
+  // Panel schedules: the raw file is the request body (no JSON/base64 wrapper),
+  // with its name in a header. Upload one at a time — the sheet record is
+  // updated on each, so parallel uploads would overwrite each other.
+  uploadWirePullFile: async (id: string, file: File) => {
+    const res = await fetch(`/api/wirepulls/${id}/files`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': file.type || 'application/octet-stream', 'x-filename': encodeURIComponent(file.name) },
+      body: file
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data as any).error || `Upload failed (${res.status})`);
+    return data as { sheet: WirePullSheet };
+  },
+  deleteWirePullFile: (id: string, fileId: string) =>
+    call<{ sheet: WirePullSheet }>(`/api/wirepulls/${id}/files/${fileId}`, { method: 'DELETE' }),
+  wirePullFileUrl: (id: string, fileId: string) => `/api/wirepulls/${id}/files/${fileId}`
 };
