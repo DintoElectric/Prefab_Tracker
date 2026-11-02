@@ -1,0 +1,72 @@
+/* ── Wire Pulls ── */
+
+.wp-modebar { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
+
+/* sheet header — own grid so full-width cells never upset the dividers */
+.wp-hdr { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--color-neutral-300); border: 1px solid var(--color-neutral-300); margin-top: 18px; }
+.wp-cell { background: #fff; padding: 14px 16px; min-width: 0; }
+.wp-cell.full { grid-column: 1 / -1; }
+.wp-cell label, .wp-cell .wp-lbl { display: block; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--color-neutral-600); margin-bottom: 6px; }
+.wp-cell .input { height: 46px; font-size: 15px; width: 100%; }
+.wp-cell textarea.input { height: auto; min-height: 0; }
+.wp-sys { display: flex; gap: 8px; flex-wrap: wrap; }
+.wp-sys .chip { flex-direction: column; align-items: flex-start; height: auto; padding: 10px 14px; text-align: left; }
+.wp-sys .chip .b { font-size: 10px; font-weight: 400; text-transform: none; letter-spacing: 0; margin-top: 3px; opacity: .85; }
+
+/* wire color chips — always carry the color NAME so a b/w printout still reads */
+.wp-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.wp-chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; font-size: 10px; font-weight: 800; letter-spacing: .08em; border: 1px solid rgba(32, 30, 29, .55); white-space: nowrap; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.wp-chip .ph { font-weight: 600; opacity: .8; letter-spacing: 0; }
+.wp-chip.ghost { opacity: .4; }
+
+/* circuit grid */
+.wp-tbl-scroll { overflow-x: auto; border: 1px solid var(--color-neutral-300); background: #fff; margin-top: 18px; }
+.wp-tbl { width: 100%; min-width: 860px; border-collapse: collapse; font-size: 12.5px; }
+.wp-tbl th { text-align: left; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-neutral-600); padding: 10px 12px; border-bottom: 2px solid var(--color-divider); white-space: nowrap; background: #fff; }
+.wp-tbl td { padding: 6px 12px; border-bottom: 1px solid var(--color-neutral-200); vertical-align: middle; }
+.wp-tbl tr.cycle td { border-top: 2px solid var(--color-neutral-400); }
+.wp-tbl td.ckt { font-family: var(--font-heading); font-weight: 800; font-size: 15px; width: 76px; }
+.wp-tbl td.ckt small { display: block; font-family: inherit; font-size: 10px; font-weight: 600; color: var(--color-neutral-600); }
+.wp-tbl td .input, .wp-tbl td select { height: 40px; font-size: 14px; width: 100%; }
+.wp-tbl td.ft input { text-align: right; font-weight: 700; font-size: 16px; }
+.wp-tbl tr.active { background: var(--color-neutral-100); }
+.wp-tbl tr.covered { color: var(--color-neutral-600); background: var(--color-neutral-100); }
+.wp-tbl tr.covered td { padding-top: 4px; padding-bottom: 4px; }
+.wp-tbl tr.bad { background: var(--color-accent-100); }
+.wp-tbl .why { color: var(--color-accent-700); font-weight: 700; font-size: 11.5px; }
+.wp-tbl .muted { color: var(--color-neutral-600); font-size: 11.5px; }
+.wp-tbl td.n label { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700; cursor: pointer; }
+.wp-tbl td.n input { width: 18px; height: 18px; }
+.wp-tbl .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* summary / cut list */
+.wp-card { background: #fff; border: 1px solid var(--color-neutral-300); margin-top: 18px; }
+.wp-card-hd { padding: 14px 18px; border-bottom: 1px solid var(--color-neutral-300); display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+.wp-card-hd .t { font-family: var(--font-heading); font-weight: 800; font-size: 15px; }
+.wp-card-hd .s { font-size: 11.5px; color: var(--color-neutral-600); margin-left: auto; }
+.wp-cut { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.wp-cut th { text-align: left; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-neutral-600); padding: 9px 18px; border-bottom: 2px solid var(--color-divider); }
+.wp-cut td { padding: 9px 18px; border-bottom: 1px solid var(--color-neutral-200); }
+.wp-cut .num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+.wp-empty-note { padding: 18px; font-size: 12.5px; color: var(--color-neutral-600); }
+
+.wp-foot { display: flex; align-items: center; gap: 14px; margin-top: 18px; flex-wrap: wrap; }
+.wp-foot .btn-primary { height: 56px; min-width: 240px; font-size: 15px; }
+.wp-foot .btn-secondary { height: 56px; padding: 0 22px; font-size: 14px; }
+.wp-foot .hint { font-size: 12px; color: var(--color-neutral-600); }
+.wp-foot .hint.err { color: var(--color-accent-700); font-weight: 700; }
+
+/* sheet cards (list) */
+.wp-sheet-meta { padding: 12px 18px; display: flex; gap: 26px; flex-wrap: wrap; font-size: 12px; border-bottom: 1px solid var(--color-neutral-300); }
+.wp-sheet-meta .k { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--color-neutral-600); }
+.wp-sheet-meta .v { font-weight: 700; font-size: 14px; margin-top: 2px; }
+.wp-sheet-acts { padding: 12px 18px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.wp-notes { padding: 12px 18px; font-size: 12.5px; border-top: 1px solid var(--color-neutral-300); white-space: pre-wrap; }
+.wp-detail .wp-tbl { min-width: 720px; }
+.wp-detail .wp-tbl-scroll { margin-top: 0; border: none; border-top: 1px solid var(--color-neutral-300); }
+
+@media print {
+  .wp-tbl-scroll, .wp-card { overflow: visible; }
+  .wp-tbl { min-width: 0; }
+  .wp-sheet-acts { display: none !important; }
+}

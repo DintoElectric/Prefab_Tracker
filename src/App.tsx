@@ -16,6 +16,7 @@ import { Materials } from './views/Materials';
 import { Users } from './views/Users';
 import { Profiles } from './views/Profiles';
 import { Bends } from './views/Bends';
+import { WirePulls } from './views/WirePulls';
 
 const CART_KEY = 'dinto-prefab-cart-v1';
 const ROLE_TAG: Record<string, { cls: string; label: string }> = {
@@ -25,7 +26,7 @@ const ROLE_TAG: Record<string, { cls: string; label: string }> = {
 };
 const TAB_LABEL: Record<string, string> = {
   catalog: 'Catalog', review: 'Request', mine: 'Mine', queue: 'Queue',
-  schedule: 'Schedule', ticket: 'Ticket', bends: 'Bends', materials: 'Materials', profiles: 'Profiles', users: 'Users'
+  schedule: 'Schedule', ticket: 'Ticket', bends: 'Bends', wirepulls: 'Wire Pulls', materials: 'Materials', profiles: 'Profiles', users: 'Users'
 };
 
 interface CartDraft { hdr: Hdr; lines: RequestLine[]; }
@@ -326,6 +327,7 @@ export default function App() {
           <Profiles profiles={profiles} onChanged={refresh} flash={flash} />
         )}
         {effectiveView === 'bends' && <Bends />}
+        {effectiveView === 'wirepulls' && <WirePulls user={user} flash={flash} />}
         {effectiveView === 'users' && <Users me={user.username} flash={flash} />}
       </main>
 

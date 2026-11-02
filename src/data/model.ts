@@ -254,9 +254,9 @@ export const SCHEMAS: Record<AssemblyKind, OptionField[]> = {
 };
 
 export const ROLE_VIEWS: Record<Role, string[]> = {
-  foreman: ['catalog', 'review', 'mine', 'bends'],
-  prefab: ['queue', 'schedule', 'ticket', 'bends'],
-  admin: ['catalog', 'review', 'mine', 'queue', 'schedule', 'ticket', 'bends', 'materials', 'profiles', 'users']
+  foreman: ['catalog', 'review', 'mine', 'bends', 'wirepulls'],
+  prefab: ['queue', 'schedule', 'ticket', 'bends', 'wirepulls'],
+  admin: ['catalog', 'review', 'mine', 'queue', 'schedule', 'ticket', 'bends', 'wirepulls', 'materials', 'profiles', 'users']
 };
 
 // The catalog fields a job spec profile can restrict, with their full option
