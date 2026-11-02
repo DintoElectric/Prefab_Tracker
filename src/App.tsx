@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ROLE_VIEWS, STATUSES, itemOf, codeFor, inferCls, lineViolation,
+  ROLE_VIEWS, ROLE_HOME, STATUSES, itemOf, codeFor, inferCls, lineViolation,
   type PrefabRequest, type RequestLine, type MaterialRow, type SessionUser, type SpecProfile
 } from './data/model';
 import { api } from './lib/api';
@@ -25,7 +25,7 @@ const ROLE_TAG: Record<string, { cls: string; label: string }> = {
   foreman: { cls: 'role-foreman', label: 'Foreman' }
 };
 const TAB_LABEL: Record<string, string> = {
-  catalog: 'Catalog', review: 'Request', mine: 'Mine', queue: 'Queue',
+  catalog: 'Catalog', review: 'Requests', mine: 'Mine', queue: 'Queue',
   schedule: 'Schedule', ticket: 'Ticket', bends: 'Bends', wirepulls: 'Wire Pulls', materials: 'Materials', profiles: 'Profiles', users: 'Users'
 };
 
@@ -104,7 +104,7 @@ export default function App() {
     const draft = loadCart(user.username);
     setCart(draft.lines);
     setHdrState(draft.hdr);
-    setView(ROLE_VIEWS[user.role][0]);
+    setView(ROLE_HOME[user.role]);
     refresh();
   }, [user?.username]);
 
@@ -127,7 +127,7 @@ export default function App() {
   const allowed = user ? ROLE_VIEWS[user.role] : [];
   const effectiveView = useMemo(() => {
     if (!user) return 'catalog';
-    let v = allowed.includes(view) ? view : allowed[0];
+    let v = allowed.includes(view) ? view : ROLE_HOME[user.role];
     if (v === 'ticket' && !requests.some(r => r.id === ticketId)) {
       v = allowed.includes('queue') ? 'queue' : allowed[0];
     }

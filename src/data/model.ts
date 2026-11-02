@@ -253,10 +253,19 @@ export const SCHEMAS: Record<AssemblyKind, OptionField[]> = {
   ]
 };
 
+// Tab order, left to right, for each role.
 export const ROLE_VIEWS: Record<Role, string[]> = {
-  foreman: ['catalog', 'review', 'mine', 'bends', 'wirepulls'],
-  prefab: ['queue', 'schedule', 'ticket', 'bends', 'wirepulls'],
-  admin: ['catalog', 'review', 'mine', 'queue', 'schedule', 'ticket', 'bends', 'wirepulls', 'materials', 'profiles', 'users']
+  foreman: ['catalog', 'bends', 'wirepulls', 'mine', 'review'],
+  prefab: ['bends', 'wirepulls', 'queue', 'schedule', 'ticket'],
+  admin: ['catalog', 'bends', 'wirepulls', 'mine', 'review', 'queue', 'schedule', 'ticket', 'materials', 'profiles', 'users']
+};
+
+// The tab each role lands on after signing in (and falls back to). Kept
+// separate from the order above so the tabs can be rearranged freely.
+export const ROLE_HOME: Record<Role, string> = {
+  foreman: 'catalog',
+  prefab: 'queue',
+  admin: 'catalog'
 };
 
 // The catalog fields a job spec profile can restrict, with their full option
