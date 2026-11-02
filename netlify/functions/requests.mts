@@ -1,5 +1,5 @@
 import {
-  requestsStore, profilesStore, currentUser, nextRequestId, json, unauthorized, forbidden,
+  requestsStore, loadSpecSelection, currentUser, nextRequestId, json, unauthorized, forbidden,
   type SpecProfileRecord
 } from '../lib/store.mts';
 
@@ -97,14 +97,15 @@ export default async function handler(req: Request, context: any) {
     const lines = cleanLines(body.lines);
     if (!lines) return json({ error: 'At least one assembly line is required' }, 400);
 
-    // Job spec profile — optional; when present it must exist, be active,
-    // and every line must be inside its allow-lists.
+    // Job spec profile(s) — optional; when present each must exist and be
+    // active (profileId may be several ids joined with '+'), they must not
+    // contradict each other, and every line must be inside the combined
+    // allow-lists.
     let profileId: string | null = null;
     let profileName: string | null = null;
     if (typeof body.profileId === 'string' && body.profileId) {
-      const profile = (await profilesStore().get(body.profileId, { type: 'json' })) as SpecProfileRecord | null;
-      if (!profile) return json({ error: 'Unknown job spec profile' }, 400);
-      if (!profile.active) return json({ error: `${profile.name} is not active` }, 400);
+      const { profile, error } = await loadSpecSelection(body.profileId);
+      if (error || !profile) return json({ error: error || 'Unknown job spec profile' }, 400);
       const bad = profileViolation(profile, lines);
       if (bad) return json({ error: bad }, 400);
       profileId = profile.id;

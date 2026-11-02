@@ -1,5 +1,6 @@
-import { itemOf, optSummary, prefSummary, lineViolation, type RequestLine, type SpecProfile } from '../data/model';
+import { itemOf, optSummary, prefSummary, lineViolation, resolveProfile, type RequestLine, type SpecProfile } from '../data/model';
 import { CodeStrip, Thumb } from '../lib/ui';
+import { SpecChecks } from '../lib/SpecChecks';
 
 export interface Hdr { job: string; needBy: string; priority: 'Standard' | 'Hot'; notes: string; profileId?: string | null; }
 
@@ -16,8 +17,7 @@ export function Review({ cart, hdr, setHdr, byName, profiles, onQty, onRemove, o
   submitting: boolean;
 }) {
   const total = cart.reduce((a, l) => a + l.qty, 0);
-  const activeProfiles = profiles.filter(p => p.active);
-  const profile = profiles.find(p => p.id === hdr.profileId) || null;
+  const profile = resolveProfile(profiles, hdr.profileId);
   return (
     <div className="page-col">
       <div className="page-title-row">
@@ -50,12 +50,11 @@ export function Review({ cart, hdr, setHdr, byName, profiles, onQty, onRemove, o
           </div>
         </div>
         <div className="hdr-cell">
-          <label htmlFor="rv-spec">Job spec profile</label>
-          <select id="rv-spec" className="input" value={hdr.profileId || ''}
-            onChange={e => setHdr({ ...hdr, profileId: e.target.value || null })}>
-            <option value="">No spec profile — full catalog</option>
-            {activeProfiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          <label>Job spec profiles</label>
+          {profiles.some(p => p.active)
+            ? <SpecChecks profiles={profiles} profileId={hdr.profileId || null}
+                onChange={(id) => setHdr({ ...hdr, profileId: id })} />
+            : <div className="spec-note">No spec profiles set up</div>}
         </div>
         <div className="hdr-cell full">
           <label htmlFor="rv-notes">Notes for prefab</label>

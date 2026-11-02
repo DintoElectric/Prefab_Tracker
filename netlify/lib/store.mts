@@ -243,19 +243,100 @@ const YALE_PROFILE: SpecProfileRecord = {
   createdAt: new Date().toISOString()
 };
 
+// Hospital Typical — allow-lists extracted from the Connecticut Children's New
+// Tower Expansion (Hartford, CannonDesign 006719.02): 26 05 33 Raceways and
+// Boxes (rev. 6/9/23) and 26 05 19 Conductors and Cables (rev. 5/10/23).
+// That spec is permissive on brands, so the hard limits are wire mfg and the
+// 3/4" minimum raceway size; everything else rides on the ticket notes.
+const HOSPITAL_PROFILE: SpecProfileRecord = {
+  id: 'hospital-typical',
+  name: 'Hospital Typical',
+  active: true,
+  notes:
+    'Basis: CT Children\'s New Tower Expansion, Div 26 (26 05 33 rev. 6/9/23, 26 05 19 rev. 5/10/23). ' +
+    'Conduit and flex: 3/4" trade size minimum (26 05 33 3.1.C) — 1/2" locked out. ' +
+    'EMT fittings: steel compression in damp locations, boiler/mechanical rooms and within block walls; ' +
+    'set screw only in dry locations, above suspended ceilings and in stud walls (3.1.D.2). ' +
+    'Gangable boxes are prohibited; box extensions must match the recessed box material (2.5.L, 2.5.M). ' +
+    'Use LFMC in damp or wet locations; flexible conduit max 72" (3.1.B.5, 3.2.Z). ' +
+    'Wire mfg limited to Southwire and Encore, the brands on both the building wire and MC cable lists ' +
+    '(26 05 19 2.1.B, 2.2.B); Cerro is not approved for MC. ' +
+    'MC / healthcare cable: 90 deg C with insulated equipment ground (2.2.C.4); healthcare facilities cable ' +
+    'may replace FMC. Concealed branch circuits: THHN/THWN in conduit to a junction box within 10 ft of the ' +
+    'first device or luminaire, MC or healthcare cable only after that box (3.2.H, 3.2.P). ' +
+    'Operating rooms / isolated power: XHHW-2 with insulated ground in raceway, no pulling compound, ' +
+    'orange hot and brown neutral with distinctive stripe (3.2.Q). ' +
+    'Emergency / essential branch circuits: XHHW-2 in non-flexible metal raceway, independent of all other ' +
+    'wiring (3.2.K). Min branch wire #12; #10 for 120 V runs over 100 ft, #8 for 120 V over 200 ft, #10 for ' +
+    '208 V over 200 ft; dedicated neutral on every circuit (3.2.V, 3.2.W). Solid #12 and smaller, stranded ' +
+    '#10 and larger (3.1). Box/fitting mfg is not restricted — EMT fittings list does not include RACO or ' +
+    'Hubbell, so confirm fittings at submittal. All wiring devices hospital grade.',
+  limits: {
+    mfgWire: ['SOUTHWIRE', 'ENCORE'],
+    trade: ['3/4', '1', '1-1/4', '1-1/2', '2']
+  },
+  createdAt: new Date().toISOString()
+};
+
+// Both built-in profiles self-heal: whenever one is missing from the store it
+// is written back, so the Yale and Hospital Typical specs are always there to
+// pick. Edits an admin makes in the Profiles tab are kept (an existing profile
+// is never overwritten). To hide a built-in profile, deactivate it rather
+// than delete it — a deleted one is restored on the next cold start.
+const BUILTIN_PROFILES: SpecProfileRecord[] = [YALE_PROFILE, HOSPITAL_PROFILE];
+
 let profilesSeeded = false;
 export async function ensureProfileSeed() {
   if (profilesSeeded) return;
-  const cfg = configStore();
   const ps = profilesStore();
-  const done = await cfg.get('seeded-profiles-v1');
-  if (done) {
-    // Self-healing, same policy as the account seed.
-    const yale = await ps.get(YALE_PROFILE.id);
-    if (yale) { profilesSeeded = true; return; }
+  for (const profile of BUILTIN_PROFILES) {
+    const exists = await ps.get(profile.id);
+    if (!exists) await ps.setJSON(profile.id, profile);
   }
-  const exists = await ps.get(YALE_PROFILE.id);
-  if (!exists) await ps.setJSON(YALE_PROFILE.id, YALE_PROFILE);
-  await cfg.set('seeded-profiles-v1', new Date().toISOString());
+  await configStore().set('seeded-profiles-v1', new Date().toISOString());
   profilesSeeded = true;
+}
+
+// ── several specs on one request ──
+// The client sends the checked profile ids joined with '+'. The effective
+// rules are the intersection of every checked profile's allow-lists (same
+// rule as mergeProfiles in src/data/model.ts). Returns the merged profile to
+// validate against, or an error message.
+export const SPEC_NO_MATCH = '__no_common_option__';
+const SPEC_LIMIT_KEYS = ['mfgBox', 'mfgWire', 'mfgConduit', 'boxStyle', 'ringStyle', 'ringSize', 'trade', 'conn'];
+const SPEC_LIMIT_LABELS: Record<string, string> = {
+  mfgBox: 'box / fitting manufacturers', mfgWire: 'wire manufacturers', mfgConduit: 'conduit manufacturers',
+  boxStyle: 'box styles', ringStyle: 'plaster ring styles', ringSize: 'plaster ring sizes',
+  trade: 'conduit / flex sizes', conn: 'connector / coupling types'
+};
+export async function loadSpecSelection(rawId: string): Promise<{ profile: SpecProfileRecord | null; error: string | null }> {
+  await ensureProfileSeed();
+  const ids = Array.from(new Set(rawId.split('+').map(x => x.trim()).filter(Boolean)));
+  if (!ids.length || ids.length > 8) return { profile: null, error: 'Unknown job spec profile' };
+  const ps = profilesStore();
+  const found: SpecProfileRecord[] = [];
+  for (const id of ids) {
+    const p = (await ps.get(id, { type: 'json' })) as SpecProfileRecord | null;
+    if (!p) return { profile: null, error: 'Unknown job spec profile' };
+    if (!p.active) return { profile: null, error: `${p.name} is not active` };
+    found.push(p);
+  }
+  if (found.length === 1) return { profile: found[0], error: null };
+  const limits: Record<string, string[]> = {};
+  const clashes: string[] = [];
+  for (const k of SPEC_LIMIT_KEYS) {
+    const lists = found.map(p => (p.limits || {})[k]).filter(l => Array.isArray(l) && l.length > 0);
+    if (!lists.length) continue;
+    const common = lists.reduce((acc, l) => acc.filter(x => l.includes(x)));
+    if (common.length) limits[k] = common;
+    else { limits[k] = [SPEC_NO_MATCH]; clashes.push(SPEC_LIMIT_LABELS[k]); }
+  }
+  const names = found.map(p => p.name).join(' + ');
+  if (clashes.length) {
+    return { profile: null, error: `${names}: no option is approved by every checked spec for ${clashes.join(', ')}` };
+  }
+  return {
+    profile: { id: found.map(p => p.id).join('+'), name: names, active: true, limits, createdAt: new Date().toISOString() },
+    error: null
+  };
 }

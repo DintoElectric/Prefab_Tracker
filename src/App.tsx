@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ROLE_VIEWS, ROLE_HOME, STATUSES, itemOf, codeFor, inferCls, lineViolation,
+  ROLE_VIEWS, ROLE_HOME, STATUSES, itemOf, codeFor, inferCls, lineViolation, resolveProfile, specConflicts,
   type PrefabRequest, type RequestLine, type MaterialRow, type SessionUser, type SpecProfile
 } from './data/model';
 import { api } from './lib/api';
@@ -154,10 +154,16 @@ export default function App() {
   const submit = async () => {
     if (!cart.length) { flash('Add at least one assembly first'); return; }
     if (!hdr.job.trim()) { flash('Job name is required'); return; }
-    const profile = profiles.find(p => p.id === hdr.profileId) || null;
+    const profile = resolveProfile(profiles, hdr.profileId);
     if (profile) {
-      // Catch lines configured before the profile was chosen (or under a
-      // different one). The server re-checks this regardless.
+      // Checked specs that contradict each other can't be built to.
+      const clashes = specConflicts(profile);
+      if (clashes.length) {
+        flash(`${profile.name}: no common approved option for ${clashes.join(', ')} — uncheck a spec`);
+        return;
+      }
+      // Catch lines configured before the specs were checked (or under
+      // different ones). The server re-checks this regardless.
       const bad = cart.map(l => lineViolation(profile, l.assemblyId, l.opts, l.mfgPref)).find(Boolean);
       if (bad) { flash(bad); return; }
     }
@@ -333,7 +339,7 @@ export default function App() {
 
       {cfgId && (
         <ConfigDrawer assemblyId={cfgId}
-          profile={profiles.find(p => p.id === hdr.profileId && p.active) || null}
+          profile={resolveProfile(profiles, hdr.profileId)}
           onAdd={(opts, qty, pref) => addToCart(cfgId, opts, qty, pref)}
           onClose={() => setCfgId(null)} />
       )}

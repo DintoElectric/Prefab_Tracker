@@ -1,5 +1,6 @@
 import { CATALOG, SYS_COLOR, sysColor, prefSummary, type RequestLine, type System, type Category, type SpecProfile } from '../data/model';
 import { CodeStrip, Thumb } from '../lib/ui';
+import { SpecChecks } from '../lib/SpecChecks';
 
 const CATS: ('All' | Category)[] = ['All', 'Boxes', 'Panelboards', 'Brackets', 'Conduit', 'Whips', 'Hardware'];
 
@@ -35,12 +36,12 @@ export function Catalog({ query, setQuery, cat, setCat, cart, profiles, profileI
         {profiles.some(p => p.active) && (
           <div className="specbar">
             <span className="cap">Job spec</span>
-            <select className="input" value={profileId || ''} aria-label="Job spec profile"
-              onChange={e => setProfileId(e.target.value || null)}>
-              <option value="">None — full catalog</option>
-              {profiles.filter(p => p.active).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-            {profileId && <span className="spec-note">Options in the configurator are limited to this spec</span>}
+            <SpecChecks profiles={profiles} profileId={profileId} onChange={setProfileId} />
+            <span className="spec-note">
+              {profileId
+                ? 'Configurator options are limited to everything the checked specs allow'
+                : 'No spec checked — full catalog'}
+            </span>
           </div>
         )}
         <div className="legendbar">

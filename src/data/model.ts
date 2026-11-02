@@ -131,6 +131,58 @@ export function lineViolation(profile: SpecProfile | null, assemblyId: string, o
   return null;
 }
 
+// ── Several specs at once ──
+// A request can follow more than one profile (e.g. a client standard plus a
+// hospital layer). The chosen profile ids travel as one string joined with
+// '+' (profile ids are slugs, so '+' never appears inside one). The effective
+// rules are the INTERSECTION of every checked profile's allow-lists: a field
+// that any checked profile restricts is limited to what all of them allow.
+// If nothing is common to all of them the field gets SPEC_NO_MATCH, which no
+// real option equals, so every existing check treats it as "nothing allowed"
+// instead of "unrestricted" (an empty list means unrestricted elsewhere).
+export const SPEC_NO_MATCH = '__no_common_option__';
+export const profileIdsOf = (id?: string | null): string[] =>
+  id ? id.split('+').map(x => x.trim()).filter(Boolean) : [];
+// Join checked ids in the order of the profile list so the same set of checks
+// always produces the same string.
+export const joinProfileIds = (ids: string[], order: SpecProfile[]): string | null =>
+  order.filter(p => ids.includes(p.id)).map(p => p.id).join('+') || null;
+
+export function mergeProfiles(list: SpecProfile[]): SpecProfile | null {
+  if (!list.length) return null;
+  if (list.length === 1) return list[0];
+  const keys: LimitKey[] = ['mfgBox', 'mfgWire', 'mfgConduit', 'boxStyle', 'ringStyle', 'ringSize', 'trade', 'conn'];
+  const limits: SpecProfileLimits = {};
+  for (const k of keys) {
+    const lists = list.map(p => (p.limits || {})[k]).filter((l): l is string[] => !!l && l.length > 0);
+    if (!lists.length) continue;
+    const common = lists.reduce((acc, l) => acc.filter(x => l.includes(x)));
+    limits[k] = common.length ? common : [SPEC_NO_MATCH];
+  }
+  return {
+    id: list.map(p => p.id).join('+'),
+    name: list.map(p => p.name).join(' + '),
+    active: true,
+    limits
+  };
+}
+// The profile in force for a '+'-joined id. Ids that are missing or inactive
+// are skipped, so a deactivated spec simply stops applying.
+export function resolveProfile(profiles: SpecProfile[], id?: string | null): SpecProfile | null {
+  const found = profileIdsOf(id)
+    .map(i => profiles.find(p => p.id === i && p.active))
+    .filter((p): p is SpecProfile => !!p);
+  return mergeProfiles(found);
+}
+// Labels of the fields where the checked specs leave no common option.
+export function specConflicts(profile: SpecProfile | null): string[] {
+  if (!profile) return [];
+  const lim = profile.limits || {};
+  return getProfileFields()
+    .filter(f => (lim[f.limitKey] || []).includes(SPEC_NO_MATCH))
+    .map(f => f.label.toLowerCase());
+}
+
 export interface SessionUser {
   username: string;
   name: string;

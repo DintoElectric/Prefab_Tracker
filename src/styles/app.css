@@ -367,6 +367,13 @@ button { font-family: inherit; cursor: pointer; }
 .specbar .cap { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--color-neutral-600); flex: none; }
 .specbar select.input { height: 40px; font-size: 13px; max-width: 320px; }
 .specbar .spec-note { font-size: 12px; color: var(--color-neutral-600); }
+.specbar { flex-wrap: wrap; }
+.spec-checks-wrap { display: flex; flex-direction: column; gap: 6px; }
+.spec-checks { display: flex; flex-wrap: wrap; gap: 8px; }
+.spec-check { display: inline-flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 14px; border: 1px solid var(--color-neutral-300); background: #fff; cursor: pointer; font-size: 13px; font-weight: 600; user-select: none; }
+.spec-check input { width: 18px; height: 18px; margin: 0; accent-color: var(--color-accent); cursor: pointer; }
+.spec-check.on { border-color: var(--color-accent); background: var(--color-accent-100); }
+.spec-warn { font-size: 12px; font-weight: 700; color: var(--color-accent); }
 .spec-banner { background: var(--color-accent-100); border-bottom: 2px solid var(--color-divider); padding: 10px 18px; font-size: 12.5px; }
 .spec-lock { margin-left: auto; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--color-accent); font-weight: 800; }
 .spec-count { margin-left: auto; font-size: 11px; color: var(--color-neutral-600); }
