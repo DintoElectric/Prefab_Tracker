@@ -12,43 +12,49 @@
 .wp-sys { display: flex; gap: 8px; flex-wrap: wrap; }
 .wp-sys .chip { flex-direction: column; align-items: flex-start; height: auto; padding: 10px 14px; text-align: left; }
 .wp-sys .chip .b { font-size: 10px; font-weight: 400; text-transform: none; letter-spacing: 0; margin-top: 3px; opacity: .85; }
+@media (max-width: 700px) { .wp-hdr { grid-template-columns: 1fr; } }
 
 /* wire color chips — always carry the color NAME so a b/w printout still reads */
-.wp-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; align-items: center; }
-.wp-chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; font-size: 10px; font-weight: 800; letter-spacing: .08em; border: 1px solid rgba(32, 30, 29, .55); white-space: nowrap; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-.wp-chip .ph { font-weight: 600; opacity: .8; letter-spacing: 0; }
-.wp-chip.ghost { opacity: .4; }
+.wp-chips { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; margin-top: 7px; }
+.wp-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; font-size: 11px; font-weight: 800; letter-spacing: .06em; border: 1px solid rgba(32, 30, 29, .55); white-space: nowrap; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.wp-chip .n { font-size: 13px; letter-spacing: 0; }
+.wp-chip .ph { font-weight: 600; opacity: .85; letter-spacing: .04em; }
+.wp-swatch { display: inline-block; width: 14px; height: 14px; border: 1px solid rgba(32, 30, 29, .55); vertical-align: -2px; margin-right: 8px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
-/* circuit grid */
+/* the entry sheet: Box # | Circuits | Footage — same three columns as the paper pull sheet */
 .wp-tbl-scroll { overflow-x: auto; border: 1px solid var(--color-neutral-300); background: #fff; margin-top: 18px; }
-.wp-tbl { width: 100%; min-width: 860px; border-collapse: collapse; font-size: 12.5px; }
-.wp-tbl th { text-align: left; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-neutral-600); padding: 10px 12px; border-bottom: 2px solid var(--color-divider); white-space: nowrap; background: #fff; }
-.wp-tbl td { padding: 6px 12px; border-bottom: 1px solid var(--color-neutral-200); vertical-align: middle; }
-.wp-tbl tr.cycle td { border-top: 2px solid var(--color-neutral-400); }
-.wp-tbl td.ckt { font-family: var(--font-heading); font-weight: 800; font-size: 15px; width: 76px; }
-.wp-tbl td.ckt small { display: block; font-family: inherit; font-size: 10px; font-weight: 600; color: var(--color-neutral-600); }
-.wp-tbl td .input, .wp-tbl td select { height: 40px; font-size: 14px; width: 100%; }
-.wp-tbl td.ft input { text-align: right; font-weight: 700; font-size: 16px; }
-.wp-tbl tr.active { background: var(--color-neutral-100); }
-.wp-tbl tr.covered { color: var(--color-neutral-600); background: var(--color-neutral-100); }
-.wp-tbl tr.covered td { padding-top: 4px; padding-bottom: 4px; }
-.wp-tbl tr.bad { background: var(--color-accent-100); }
-.wp-tbl .why { color: var(--color-accent-700); font-weight: 700; font-size: 11.5px; }
-.wp-tbl .muted { color: var(--color-neutral-600); font-size: 11.5px; }
-.wp-tbl td.n label { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700; cursor: pointer; }
-.wp-tbl td.n input { width: 18px; height: 18px; }
-.wp-tbl .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wp-box-tbl { width: 100%; min-width: 640px; border-collapse: collapse; font-size: 13px; }
+.wp-box-tbl th { text-align: left; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-neutral-600); padding: 10px 12px; border-bottom: 2px solid var(--color-divider); white-space: nowrap; }
+.wp-box-tbl td { padding: 8px 12px; border-bottom: 1px solid var(--color-neutral-200); vertical-align: top; }
+.wp-box-tbl td .input { height: 48px; font-size: 17px; font-weight: 700; width: 100%; }
+.wp-box-tbl td.cx .input { font-weight: 600; letter-spacing: .02em; }
+.wp-box-tbl tr.bad { background: var(--color-accent-100); }
+.wp-box-tbl .why { color: var(--color-accent-700); font-weight: 700; font-size: 12px; margin-top: 6px; }
+.wp-box-tbl td.rm { text-align: center; padding-top: 12px; }
+.wp-ft { display: flex; align-items: center; gap: 6px; }
+.wp-ft span { font-size: 12px; color: var(--color-neutral-600); font-weight: 700; }
+.wp-hint-row { margin-top: 10px; font-size: 12px; color: var(--color-neutral-600); line-height: 1.5; }
 
-/* summary / cut list */
+/* cards */
 .wp-card { background: #fff; border: 1px solid var(--color-neutral-300); margin-top: 18px; }
 .wp-card-hd { padding: 14px 18px; border-bottom: 1px solid var(--color-neutral-300); display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
 .wp-card-hd .t { font-family: var(--font-heading); font-weight: 800; font-size: 15px; }
 .wp-card-hd .s { font-size: 11.5px; color: var(--color-neutral-600); margin-left: auto; }
-.wp-cut { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.wp-cut th { text-align: left; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-neutral-600); padding: 9px 18px; border-bottom: 2px solid var(--color-divider); }
-.wp-cut td { padding: 9px 18px; border-bottom: 1px solid var(--color-neutral-200); }
-.wp-cut .num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
 .wp-empty-note { padding: 18px; font-size: 12.5px; color: var(--color-neutral-600); }
+
+/* the report: per box, per color */
+.wp-rpt { width: 100%; border-collapse: collapse; font-size: 13px; }
+.wp-rpt th { text-align: left; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-neutral-600); padding: 9px 18px; border-bottom: 2px solid var(--color-divider); }
+.wp-rpt td { padding: 9px 18px; border-bottom: 1px solid var(--color-neutral-200); vertical-align: top; }
+.wp-rpt tr.box-start td { border-top: 2px solid var(--color-neutral-400); }
+.wp-rpt tbody tr.box-start:first-child td { border-top: none; }
+.wp-rpt td.box { width: 150px; border-right: 1px solid var(--color-neutral-200); background: var(--color-neutral-100); }
+.wp-rpt td.box .b { font-family: var(--font-heading); font-weight: 800; font-size: 16px; }
+.wp-rpt td.box .s { font-size: 11.5px; color: var(--color-neutral-700); margin-top: 3px; font-weight: 700; }
+.wp-rpt .num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+.wp-rpt .circs { line-height: 1.5; }
+.wp-rpt .none { color: var(--color-accent-700); font-weight: 700; font-size: 11.5px; }
+.wp-rpt tr.total td { border-top: 2px solid var(--color-divider); font-weight: 800; background: var(--color-neutral-100); }
 
 .wp-foot { display: flex; align-items: center; gap: 14px; margin-top: 18px; flex-wrap: wrap; }
 .wp-foot .btn-primary { height: 56px; min-width: 240px; font-size: 15px; }
@@ -62,11 +68,25 @@
 .wp-sheet-meta .v { font-weight: 700; font-size: 14px; margin-top: 2px; }
 .wp-sheet-acts { padding: 12px 18px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .wp-notes { padding: 12px 18px; font-size: 12.5px; border-top: 1px solid var(--color-neutral-300); white-space: pre-wrap; }
-.wp-detail .wp-tbl { min-width: 720px; }
-.wp-detail .wp-tbl-scroll { margin-top: 0; border: none; border-top: 1px solid var(--color-neutral-300); }
+.wp-detail .wp-card { margin-top: 0; border: none; border-top: 1px solid var(--color-neutral-300); }
 
 @media print {
   .wp-tbl-scroll, .wp-card { overflow: visible; }
-  .wp-tbl { min-width: 0; }
   .wp-sheet-acts { display: none !important; }
 }
+
+/* circuits field — each number you enter turns into its wire color */
+.wp-circ-field { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 48px; padding: 6px 8px; background: #fff; border: 1px solid var(--color-neutral-400); cursor: text; }
+.wp-circ-field:focus-within { outline: 2px solid var(--color-accent); outline-offset: -1px; }
+.wp-circ-field .wp-chip { height: 34px; padding: 0 6px 0 10px; gap: 7px; }
+.wp-circ-field .wp-chip .n { font-size: 17px; font-weight: 800; }
+.wp-circ-field .wp-chip .x { all: unset; cursor: pointer; width: 20px; height: 20px; line-height: 19px; text-align: center; font-size: 15px; opacity: .7; }
+.wp-circ-field .wp-chip .x:hover { opacity: 1; }
+.wp-circ-field input { border: none; outline: none; background: transparent; flex: 1 1 70px; min-width: 70px; height: 34px; font-size: 17px; font-weight: 800; padding: 0 8px; color: var(--color-text); }
+.wp-circ-field input.live { flex: 0 0 64px; min-width: 64px; text-align: center; border: 1px solid rgba(32, 30, 29, .55); }
+.wp-ft-note { font-size: 11.5px; color: var(--color-neutral-700); margin-top: 6px; font-weight: 600; }
+
+/* one run = one circuit's wire */
+.wp-run { display: inline-flex; align-items: baseline; gap: 6px; margin: 0 6px 5px 0; padding: 3px 9px; border: 1px solid var(--color-neutral-400); background: #fff; font-size: 12.5px; white-space: nowrap; }
+.wp-run b { font-family: var(--font-heading); font-weight: 800; font-size: 14px; }
+.wp-run.none { border-color: var(--color-accent-300); background: var(--color-accent-100); color: var(--color-accent-700); font-weight: 700; }

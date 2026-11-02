@@ -1,5 +1,5 @@
 import type { PrefabRequest, MaterialRow, SessionUser, Role, SpecProfile, SpecProfileLimits } from '../data/model';
-import type { WirePullSheet, WirePullRow, VoltageSystem } from '../data/wirepulls';
+import type { WirePullSheet, BoxRow, VoltageSystem } from '../data/wirepulls';
 
 export interface AccountRow {
   username: string; name: string; role: Role; active: boolean; createdAt: string;
@@ -56,8 +56,8 @@ export const api = {
 
   listWirePulls: () => call<{ sheets: WirePullSheet[] }>('/api/wirepulls'),
   createWirePull: (payload: {
-    job: string; panel: string; system: VoltageSystem; spaces: number;
-    needBy: string; priority: string; notes: string; rows: WirePullRow[];
+    job: string; floor: string; panel: string; system: VoltageSystem;
+    needBy: string; priority: string; notes: string; boxes: BoxRow[];
   }) => call<{ sheet: WirePullSheet }>('/api/wirepulls', { method: 'POST', body: JSON.stringify(payload) }),
   patchWirePull: (id: string, body: { status: string }) =>
     call<{ sheet: WirePullSheet }>(`/api/wirepulls/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),

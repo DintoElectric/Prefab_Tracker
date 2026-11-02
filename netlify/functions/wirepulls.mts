@@ -21,8 +21,10 @@ async function loadAll() {
   const { blobs } = await store.list();
   const all: any[] = [];
   for (const b of blobs) {
-    const s = await store.get(b.key, { type: 'json' });
-    if (s) all.push(s);
+    const s: any = await store.get(b.key, { type: 'json' });
+    // Sheets saved by the earlier circuit-by-circuit layout have no `boxes`
+    // list; skip them rather than break the screen. They are not deleted.
+    if (s && Array.isArray(s.boxes)) all.push(s);
   }
   all.sort((a, b) => idNum(b.id) - idNum(a.id)); // newest first
   return all;
