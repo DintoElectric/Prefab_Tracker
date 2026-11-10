@@ -1,5 +1,6 @@
 import type { PrefabRequest, MaterialRow, SessionUser, Role, SpecProfile, SpecProfileLimits } from '../data/model';
 import type { WirePullSheet, BoxRow, VoltageSystem } from '../data/wirepulls';
+import type { WiremoldTicket, WiremoldBuild } from '../data/wiremold';
 
 export interface AccountRow {
   username: string; name: string; role: Role; active: boolean; createdAt: string;
@@ -79,5 +80,12 @@ export const api = {
   },
   deleteWirePullFile: (id: string, fileId: string) =>
     call<{ sheet: WirePullSheet }>(`/api/wirepulls/${id}/files/${fileId}`, { method: 'DELETE' }),
-  wirePullFileUrl: (id: string, fileId: string) => `/api/wirepulls/${id}/files/${fileId}`
+  wirePullFileUrl: (id: string, fileId: string) => `/api/wirepulls/${id}/files/${fileId}`,
+
+  listWiremold: () => call<{ tickets: WiremoldTicket[] }>('/api/wiremold'),
+  createWiremold: (payload: { job: string; needBy: string; priority: string; notes: string; builds: WiremoldBuild[] }) =>
+    call<{ ticket: WiremoldTicket }>('/api/wiremold', { method: 'POST', body: JSON.stringify(payload) }),
+  patchWiremold: (id: string, body: { status: string }) =>
+    call<{ ticket: WiremoldTicket }>(`/api/wiremold/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteWiremold: (id: string) => call<{ ok: true }>(`/api/wiremold/${id}`, { method: 'DELETE' })
 };

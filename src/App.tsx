@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ROLE_VIEWS, ROLE_HOME, STATUSES, itemOf, codeFor, inferCls, lineViolation, resolveProfile, specConflicts,
+  ROLE_VIEWS, ROLE_HOME, STATUSES, itemOf, codeFor, inferCls, lineViolation,
   type PrefabRequest, type RequestLine, type MaterialRow, type SessionUser, type SpecProfile
 } from './data/model';
 import { api } from './lib/api';
@@ -17,6 +17,7 @@ import { Users } from './views/Users';
 import { Profiles } from './views/Profiles';
 import { Bends } from './views/Bends';
 import { WirePulls } from './views/WirePulls';
+import { Wiremold } from './views/Wiremold';
 
 const CART_KEY = 'dinto-prefab-cart-v1';
 const ROLE_TAG: Record<string, { cls: string; label: string }> = {
@@ -26,7 +27,7 @@ const ROLE_TAG: Record<string, { cls: string; label: string }> = {
 };
 const TAB_LABEL: Record<string, string> = {
   catalog: 'Catalog', review: 'Requests', mine: 'Mine', queue: 'Queue',
-  schedule: 'Schedule', ticket: 'Ticket', bends: 'Bends', wirepulls: 'Wire Pulls', materials: 'Materials', profiles: 'Profiles', users: 'Users'
+  schedule: 'Schedule', ticket: 'Ticket', bends: 'Bends', wirepulls: 'Wire Pulls', wiremold: 'Wiremold', materials: 'Materials', profiles: 'Profiles', users: 'Users'
 };
 
 interface CartDraft { hdr: Hdr; lines: RequestLine[]; }
@@ -154,16 +155,10 @@ export default function App() {
   const submit = async () => {
     if (!cart.length) { flash('Add at least one assembly first'); return; }
     if (!hdr.job.trim()) { flash('Job name is required'); return; }
-    const profile = resolveProfile(profiles, hdr.profileId);
+    const profile = profiles.find(p => p.id === hdr.profileId) || null;
     if (profile) {
-      // Checked specs that contradict each other can't be built to.
-      const clashes = specConflicts(profile);
-      if (clashes.length) {
-        flash(`${profile.name}: no common approved option for ${clashes.join(', ')} — uncheck a spec`);
-        return;
-      }
-      // Catch lines configured before the specs were checked (or under
-      // different ones). The server re-checks this regardless.
+      // Catch lines configured before the profile was chosen (or under a
+      // different one). The server re-checks this regardless.
       const bad = cart.map(l => lineViolation(profile, l.assemblyId, l.opts, l.mfgPref)).find(Boolean);
       if (bad) { flash(bad); return; }
     }
@@ -334,12 +329,13 @@ export default function App() {
         )}
         {effectiveView === 'bends' && <Bends />}
         {effectiveView === 'wirepulls' && <WirePulls user={user} flash={flash} />}
+        {effectiveView === 'wiremold' && <Wiremold user={user} flash={flash} />}
         {effectiveView === 'users' && <Users me={user.username} flash={flash} />}
       </main>
 
       {cfgId && (
         <ConfigDrawer assemblyId={cfgId}
-          profile={resolveProfile(profiles, hdr.profileId)}
+          profile={profiles.find(p => p.id === hdr.profileId && p.active) || null}
           onAdd={(opts, qty, pref) => addToCart(cfgId, opts, qty, pref)}
           onClose={() => setCfgId(null)} />
       )}
