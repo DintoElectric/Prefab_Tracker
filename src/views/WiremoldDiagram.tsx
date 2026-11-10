@@ -1,5 +1,5 @@
 import {
-  wiremoldGeometry, formatLength, wireColor, FEED_ENDS, DEVICE_COLORS, sizeLabel,
+  wiremoldGeometry, formatLength, wireColor, wireLengthText, FEED_ENDS, DEVICE_COLORS, sizeLabel,
   type WiremoldBuild, type WireColor
 } from '../data/wiremold';
 
@@ -8,7 +8,7 @@ import {
 // they stay readable. A long run wraps onto extra rows (up to 20 ft each).
 
 const W = 940;            // drawing width
-const PADX = 58;          // room beside the run for the feed arrows
+const PADX = 72;          // room beside the run for the feed arrow and its whip / end-cap label
 const ROW_H = 160;
 const TOP = 12;
 const BAR_TOP = 80;       // raceway bar, within a row
@@ -96,8 +96,8 @@ export function WiremoldDiagram({ build }: { build: WiremoldBuild }) {
             {!isLast && <path d={`M ${xr - 3},${y(BAR_TOP - 5)} L ${xr + 3},${y(BAR_TOP + BAR_H + 5)}`} style={{ stroke: muted }} strokeWidth={2} />}
 
             {/* feed arrows */}
-            {isFirst && feedLeft && <FeedArrow x={xl} cy={y(barCy)} dir="right" />}
-            {isLast && feedRight && <FeedArrow x={xr} cy={y(barCy)} dir="left" />}
+            {isFirst && feedLeft && <FeedArrow x={xl} cy={y(barCy)} dir="right" whipIn={build.whipIn ?? null} />}
+            {isLast && feedRight && <FeedArrow x={xr} cy={y(barCy)} dir="left" whipIn={build.whipIn ?? null} />}
 
             {/* dimensions: one line per piece, labeled on the first piece only */}
             {segs.map(({ s, i }) => {
@@ -159,18 +159,34 @@ export function WiremoldDiagram({ build }: { build: WiremoldBuild }) {
   );
 }
 
-// An arrow entering an end of the run, labeled FEED. `dir` is the way the arrow
-// points: "right" sits left of the run (feeding the left end), "left" sits right.
-function FeedArrow({ x, cy, dir }: { x: number; cy: number; dir: 'left' | 'right' }) {
+// The fed end of the run. `dir` is the way the feed points: "right" sits left of
+// the run (feeding the left end), "left" sits right of it.
+//   • with a whip: a wavy lead into the run, labeled with the whip's length
+//   • without one: a straight arrow into an end cap — the wire stops there, capped
+// The whip is not to scale (it hangs off the end of the run).
+function FeedArrow({ x, cy, dir, whipIn }: { x: number; cy: number; dir: 'left' | 'right'; whipIn: number | null }) {
   const side = dir === 'right' ? -1 : 1;          // which side of the run it sits on
-  const tail = x + side * 48;
+  const tail = x + side * 64;
   const tip = x + side * 4;
   const base = tip + side * 9;                    // back of the arrowhead
+  const mid = (tail + tip) / 2;
+  const waves = 5, step = (base - tail) / waves;  // signed: runs from the tail toward the run
+  const wavy = `M ${tail},${cy} ` + Array.from({ length: waves }, (_, i) =>
+    `Q ${tail + step * (i + 0.5)},${cy + (i % 2 ? 8 : -8)} ${tail + step * (i + 1)},${cy}`).join(' ');
   return (
     <g>
-      <line x1={tail} y1={cy} x2={base} y2={cy} style={{ stroke: accent }} strokeWidth={3.5} />
+      {whipIn
+        ? <path d={wavy} fill="none" style={{ stroke: accent }} strokeWidth={3} strokeLinecap="round" />
+        : <line x1={tail} y1={cy} x2={base} y2={cy} style={{ stroke: accent }} strokeWidth={3.5} />}
       <polygon points={`${tip},${cy} ${base},${cy - 7} ${base},${cy + 7}`} style={{ fill: accent }} />
-      <text x={(tail + tip) / 2} y={cy - 11} textAnchor="middle" style={{ fill: accent }} fontSize={11} fontWeight={800} letterSpacing={1}>FEED</text>
+      {!whipIn && <rect x={x - 3} y={cy - BAR_H / 2 - 5} width={6} height={BAR_H + 10} rx={1.5} fill="#201e1d" />}
+      <text x={mid} y={cy - 14} textAnchor="middle" style={{ fill: accent }} fontSize={11} fontWeight={800} letterSpacing={1}>FEED</text>
+      <text x={mid} y={cy + 24} textAnchor="middle" style={{ fill: ink }} fontSize={10.5} fontWeight={800}>
+        {whipIn ? formatLength(whipIn) : 'END'}
+      </text>
+      <text x={mid} y={cy + 36} textAnchor="middle" style={{ fill: muted }} fontSize={10} fontWeight={700} letterSpacing={0.6}>
+        {whipIn ? 'WHIP' : 'CAPPED'}
+      </text>
     </g>
   );
 }
@@ -208,8 +224,17 @@ export function WiremoldFigure({ build }: { build: WiremoldBuild }) {
           })}
         </div>
         <div className="wm-legend-row">
+          <span className="wm-legend-k">Cut wire</span>
+          <span className="wm-key"><b>{wireLengthText(build)}</b></span>
+        </div>
+        <div className="wm-legend-row">
           <span className="wm-legend-k">Fed from</span>
           <span className="wm-key"><b>{feed}</b></span>
+          <span className="wm-key">
+            {build.whipIn
+              ? `${formatLength(build.whipIn)} whip${build.feed === 'both' ? ' at each end' : ''}`
+              : 'no whip — wire end capped'}
+          </span>
           <span className="wm-note">Left and right as you face the run · positions to scale, devices enlarged</span>
         </div>
       </figcaption>

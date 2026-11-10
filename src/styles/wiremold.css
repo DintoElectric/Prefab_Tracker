@@ -106,3 +106,9 @@
   .wm-acts { display: none !important; }
   .wm-build, .wm-card { overflow: visible; }
 }
+
+/* spacing of each gap — same panel as the color of each device */
+.wm-gap b { width: 50px; white-space: nowrap; font-size: 12.5px; }
+.wm-each-item input { flex: 1; min-width: 0; height: 34px; padding: 0 8px; font-size: 14px; font-weight: 700; border: 1px solid var(--color-neutral-400); background: #fff; color: var(--color-text); }
+.wm-each-item input::placeholder { color: var(--color-neutral-600); font-weight: 600; opacity: 1; }
+.wm-each-item.bad { border-color: var(--color-accent); background: var(--color-accent-100); }

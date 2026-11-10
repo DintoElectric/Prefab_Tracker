@@ -7,7 +7,7 @@ import {
   FEED_ENDS, DEVICE_COLORS, WIRE_COLORS, WIRE_TYPES, WIRE_SIZES, ROLES, WIRE_PRESETS, WM_STATUSES,
   MAX_DEVICES, MAX_CONDUCTORS, MAX_BUILDS,
   deviceColor, wireColor, resolveDraft, emptyBuildDraft, ticketTotals, layoutBuild, formatLength,
-  fmtFeetDecimal, sizeLabel, isDeviceColor, isRole, isWireColor,
+  fmtFeetDecimal, sizeLabel, isDeviceColor, isRole, isWireColor, wireLengthText,
   type BuildDraft, type DraftResult, type WiremoldBuild, type WiremoldTicket, type TicketTotals, type WireRole
 } from '../data/wiremold';
 import '../styles/wiremold.css';
@@ -63,7 +63,8 @@ interface Draft {
 const emptyDraft = (): Draft => ({ job: '', needBy: '', priority: 'Standard', notes: '', builds: [emptyBuildDraft()] });
 
 const isBlankBuild = (d: BuildDraft) =>
-  !d.label.trim() && !d.length.trim() && !d.devices.trim() && !d.spacing.trim() && !d.start.trim();
+  !d.label.trim() && !d.length.trim() && !d.devices.trim() && !d.spacing.trim() && !d.start.trim()
+  && !(d.whip || '').trim() && !(d.gaps || []).some(g => (g || '').trim());
 
 // A long ticket shouldn't be lost to a dropped tab or a locked phone. Same
 // per-user, per-device draft idea the catalog cart uses.
@@ -73,6 +74,10 @@ function cleanBuildDraft(raw: any): BuildDraft {
   if (!raw || typeof raw !== 'object') return base;
   const d: BuildDraft = { ...base, ...raw };
   d.colors = Array.isArray(raw.colors) ? raw.colors.map((c: unknown) => (isDeviceColor(c) ? c : '')) : [];
+  // fields added later — drafts saved before them simply don't have them
+  d.gaps = Array.isArray(raw.gaps) ? raw.gaps.map((g: unknown) => (typeof g === 'string' ? g : '')) : [];
+  d.eachGap = raw.eachGap === true;
+  d.whip = typeof raw.whip === 'string' ? raw.whip : '';
   const cs = Array.isArray(raw.conductors)
     ? raw.conductors.filter((c: any) => isRole(c?.role) && isWireColor(c?.color)).map((c: any) => ({ role: c.role as WireRole, color: c.color as string }))
     : [];
@@ -107,6 +112,8 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
     onPatch({ conductors: d.conductors.map((c, k) => (k === j ? { ...c, ...patch } : c)) });
   const allColor = deviceColor(d.deviceColor);
   const e = res.errors;
+  const gapCount = Math.max(0, deviceCount - 1);
+  const ownGaps = (d.gaps || []).slice(0, gapCount).filter(g => (g || '').trim()).length;
 
   return (
     <section className="wm-build" aria-label={p}>
@@ -143,14 +150,49 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
             </div>
           </div>
 
-          {/* 3: spacing */}
+          {/* 3: spacing — one value for every gap, and each gap can have its own */}
           <div className="wm-f">
             <label htmlFor={`wm-sp-${n}`}>Spacing between devices (feet / inches)</label>
             <input id={`wm-sp-${n}`} className="input" aria-label={`${p} spacing`} placeholder={`2'-6"`} autoComplete="off"
               value={d.spacing} onChange={ev => onPatch({ spacing: ev.target.value.slice(0, 120) })} />
             {e.spacing ? <div className="wm-why">{e.spacing}</div>
               : <div className="wm-echo">{deviceCount === 1 ? 'One device — no spacing needed' : res.echo.spacing || ''}</div>}
-            <div className="wm-help">One spacing is used between every pair of devices. For uneven gaps, type one per gap separated by commas (2', 3'-6", 2').</div>
+            <div className="wm-help">
+              {ownGaps
+                ? 'Used for every gap that doesn’t have its own spacing below.'
+                : 'Used between every pair of devices.'}
+            </div>
+            {gapCount > 0 && (
+              <button type="button" className="wm-linkbtn" onClick={() => onPatch({ eachGap: !d.eachGap })}>
+                {d.eachGap ? 'Hide the spacing of each gap' : 'Set the spacing of each gap'}
+              </button>
+            )}
+            {d.eachGap && gapCount > 0 && (
+              <>
+                <div className="wm-each">
+                  {Array.from({ length: gapCount }, (_, k) => (
+                    <div className={'wm-each-item wm-gap' + (res.badGaps.includes(k) ? ' bad' : '')} key={k}>
+                      <b>{k + 1} → {k + 2}</b>
+                      <input aria-label={`${p} gap ${k + 1} spacing`} autoComplete="off"
+                        placeholder={res.gapEcho[k] || '—'} value={(d.gaps || [])[k] || ''}
+                        onChange={ev => {
+                          const gaps = (d.gaps || []).slice();
+                          while (gaps.length < gapCount) gaps.push('');
+                          gaps[k] = ev.target.value.slice(0, 20);
+                          onPatch({ gaps });
+                        }} />
+                    </div>
+                  ))}
+                </div>
+                {e.gaps && <div className="wm-why">{e.gaps}</div>}
+                <div className="wm-help">Leave a gap blank to use the main spacing (shown in gray).</div>
+                {ownGaps > 0 && (
+                  <button type="button" className="wm-linkbtn" onClick={() => onPatch({ gaps: [] })}>
+                    Reset every gap to the main spacing
+                  </button>
+                )}
+              </>
+            )}
           </div>
 
           {/* where the first device sits */}
@@ -213,6 +255,15 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
               ))}
             </div>
             <div className="wm-help">Left and right as you face the run.</div>
+          </div>
+
+          {/* whip at the fed end — blank means the wire is end capped */}
+          <div className="wm-f">
+            <label htmlFor={`wm-wh-${n}`}>Whip length (optional)</label>
+            <input id={`wm-wh-${n}`} className="input" aria-label={`${p} whip`} placeholder="blank = end capped" autoComplete="off"
+              value={d.whip || ''} onChange={ev => onPatch({ whip: ev.target.value.slice(0, 20) })} />
+            {e.whip ? <div className="wm-why">{e.whip}</div> : <div className="wm-echo">{res.echo.whip || ''}</div>}
+            <div className="wm-help">A plain number is feet (6 = 6'). The whip’s length is added to every conductor.</div>
           </div>
 
           {/* 6: wire type and colors */}
@@ -318,7 +369,7 @@ function TicketForm({ user, flash, onSubmitted }: {
       if (!r.build) {
         const why = !r.complete && !Object.keys(r.errors).length
           ? 'fill in the length, device count and spacing'
-          : (r.errors.fit || r.errors.length || r.errors.devices || r.errors.spacing || r.errors.start || r.errors.qty || r.errors.wire || 'fill in the length, device count and spacing');
+          : (r.errors.fit || r.errors.length || r.errors.devices || r.errors.spacing || r.errors.gaps || r.errors.start || r.errors.whip || r.errors.qty || r.errors.wire || 'fill in the length, device count and spacing');
         flash(`Build ${i + 1}: ${why}`);
         return;
       }
@@ -419,6 +470,8 @@ function BuildDetail({ b, n }: { b: WiremoldBuild; n: number }) {
           <dt>First device</dt><dd>{formatLength(lay.startIn)} from the left end{b.startIn === null ? ' (centered)' : ''}</dd>
           <dt>Last device</dt><dd>{formatLength(lay.endIn)} from the right end</dd>
           <dt>Fed from</dt><dd>{feed}</dd>
+          <dt>Whip</dt>
+          <dd>{b.whipIn ? `${formatLength(b.whipIn)}${b.feed === 'both' ? ' at each end' : ''}` : 'None — wire end capped'}</dd>
           <dt>Wire</dt><dd>{sizeLabel(b.wire.size)} {b.wire.type}</dd>
           <dt>Conductors</dt>
           <dd>
@@ -426,7 +479,7 @@ function BuildDetail({ b, n }: { b: WiremoldBuild; n: number }) {
               <div key={i}><WireSwatch colorKey={c.color} />{c.role[0].toUpperCase() + c.role.slice(1)} · {wireColor(c.color).label}</div>
             ))}
             <div style={{ color: 'var(--color-neutral-600)', fontWeight: 400 }}>
-              {b.wire.conductors.length} × {formatLength(b.lengthIn)} per run{b.qty > 1 ? `, ${b.qty} runs` : ''}
+              Cut {b.wire.conductors.length} × {wireLengthText(b)}{b.qty > 1 ? ` · ${b.qty} runs` : ''}
             </div>
           </dd>
         </dl>

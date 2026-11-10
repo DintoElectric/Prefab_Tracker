@@ -6,12 +6,16 @@
 //   • length of the run
 //   • how many devices, and the spacing between them (feet/inches)
 //   • the color of each device
-//   • which end it is fed from
+//   • which end it is fed from, and the whip there (none = the wire is end capped)
 //   • the wire: type, size, and the color of every conductor
 //
-// Spacing is ONE value (used between every pair of devices) or one per gap,
-// in order. Devices are centered on the run unless the foreman gives the
-// distance from the left end to the first device.
+// Wire is cut longer than the run: every device adds a foot to each conductor,
+// and a whip adds its own length at each fed end.
+//
+// Spacing is ONE value used between every pair of devices; any single gap can
+// be given its own spacing, which replaces the main one for that gap only (the
+// same way one device can be given its own color). Devices are centered on the
+// run unless the foreman gives the distance from the left end to the first device.
 //
 // "Left" and "right" are as you face the run.
 //
@@ -29,6 +33,8 @@ export const MAX_DEVICES = 60;
 export const MAX_QTY = 99;
 export const MAX_BUILDS = 40;
 export const MAX_CONDUCTORS = 8;
+export const DEVICE_WIRE_IN = 12;        // every device adds this much wire to each conductor
+export const MAX_WHIP_IN = 50 * 12;      // longest whip
 export const SIXTEENTH = 1 / 16;
 
 // ── choices ──
@@ -186,7 +192,31 @@ export interface WiremoldBuild {
   startIn: number | null;      // first device from the LEFT end; null = centered
   deviceColors: string[];      // one per device
   feed: FeedEnd;
+  whipIn: number | null;       // whip at each fed end, inches; null = no whip, the wire is end capped
   wire: WireSpec;
+}
+
+// How long each conductor is cut for one run of a build.
+export const feedCount = (feed: FeedEnd) => (feed === 'both' ? 2 : 1);
+export interface WireLength {
+  runIn: number;       // the run itself
+  devicesIn: number;   // a foot for every device
+  whipIn: number;      // the whip(s) — both ends fed means two
+  whips: number;       // how many whips (0 when end capped)
+  totalIn: number;
+}
+export function conductorLength(b: Pick<WiremoldBuild, 'lengthIn' | 'devices' | 'feed'> & { whipIn?: number | null }): WireLength {
+  const devicesIn = b.devices * DEVICE_WIRE_IN;
+  const whips = b.whipIn ? feedCount(b.feed) : 0;
+  const whipIn = (b.whipIn || 0) * whips;
+  return { runIn: b.lengthIn, devicesIn, whipIn, whips, totalIn: b.lengthIn + devicesIn + whipIn };
+}
+// "23'-0" each — 12'-0" run + 5'-0" for 5 devices + 6'-0" whip"
+export function wireLengthText(b: Pick<WiremoldBuild, 'lengthIn' | 'devices' | 'feed'> & { whipIn?: number | null }): string {
+  const w = conductorLength(b);
+  const parts = [`${formatLength(w.runIn)} run`, `${formatLength(w.devicesIn)} for ${b.devices} device${b.devices === 1 ? '' : 's'}`];
+  if (w.whips) parts.push(`${formatLength(w.whipIn)} for ${w.whips === 1 ? 'the whip' : '2 whips'}`);
+  return `${formatLength(w.totalIn)} each — ${parts.join(' + ')}`;
 }
 
 export interface Layout {
@@ -240,6 +270,14 @@ export function checkBuild(raw: any): BuildCheck {
 
   if (raw?.feed !== 'left' && raw?.feed !== 'right' && raw?.feed !== 'both') return bad('choose a feed end');
 
+  // A missing whip is fine — that is an end cap (and what tickets sent before this field existed mean).
+  let whipIn: number | null = null;
+  if (raw?.whipIn !== null && raw?.whipIn !== undefined) {
+    whipIn = r16(num(raw.whipIn));
+    if (!(whipIn > 0)) return bad('whip length must be more than zero — leave it out for an end cap');
+    if (whipIn > MAX_WHIP_IN) return bad(`whip is over ${formatLength(MAX_WHIP_IN)}`);
+  }
+
   const w = raw?.wire;
   const type = String(w?.type ?? '').trim().slice(0, 40);
   if (!type) return bad('wire type is required');
@@ -256,7 +294,7 @@ export function checkBuild(raw: any): BuildCheck {
     ok: true,
     build: {
       label, qty, lengthIn, devices, gapsIn, startIn, deviceColors: colorsRaw as string[],
-      feed: raw.feed, wire: { type, size: w.size, conductors }
+      feed: raw.feed, whipIn, wire: { type, size: w.size, conductors }
     }
   };
 }
@@ -267,9 +305,12 @@ export interface BuildDraft {
   qty: string;
   length: string;          // "12'" — a bare number means feet
   devices: string;
-  spacing: string;         // "2'-6"" or "2', 3'" — a bare number means inches
+  spacing: string;         // "2'-6"" for every gap — a bare number means inches
+  gaps: string[];          // a gap's own spacing; '' = use the main spacing for that gap
+  eachGap: boolean;        // the "spacing of each gap" panel is open
   start: string;           // blank = centered; a bare number means inches
   feed: FeedEnd;
+  whip: string;            // whip length at the fed end(s); blank = end capped; a bare number means feet
   deviceColor: string;     // color for every device…
   colors: string[];        // …unless this has an entry for that device
   each: boolean;           // the "color each device" panel is open
@@ -279,17 +320,19 @@ export interface BuildDraft {
 }
 
 export const emptyBuildDraft = (): BuildDraft => ({
-  label: '', qty: '1', length: '', devices: '', spacing: '', start: '', feed: 'left',
+  label: '', qty: '1', length: '', devices: '', spacing: '', gaps: [], eachGap: false, start: '', feed: 'left', whip: '',
   deviceColor: DEFAULT_DEVICE_COLOR, colors: [], each: false,
   wireType: DEFAULT_WIRE_TYPE, wireSize: DEFAULT_WIRE_SIZE,
   conductors: WIRE_PRESETS[0].conductors.map(c => ({ ...c }))
 });
 
-export type DraftField = 'qty' | 'length' | 'devices' | 'spacing' | 'start' | 'wire' | 'fit';
+export type DraftField = 'qty' | 'length' | 'devices' | 'spacing' | 'gaps' | 'start' | 'whip' | 'wire' | 'fit';
 export interface DraftResult {
   build: WiremoldBuild | null;                 // set only when nothing is wrong
   errors: Partial<Record<DraftField, string>>;
-  echo: { length?: string; spacing?: string; start?: string; end?: string };   // how it was understood
+  echo: { length?: string; spacing?: string; start?: string; end?: string; whip?: string };   // how it was understood
+  gapEcho: string[];                           // the spacing in force for each gap ('' where none is known yet)
+  badGaps: number[];                           // gaps whose own spacing can't be read
   complete: boolean;                           // false while the essentials are still blank
 }
 
@@ -322,20 +365,48 @@ export function resolveDraft(d: BuildDraft): DraftResult {
   else if (!/^\d+$/.test(d.devices.trim()) || +d.devices < 1 || +d.devices > MAX_DEVICES) errors.devices = `1–${MAX_DEVICES}`;
   else devices = parseInt(d.devices, 10);
 
-  // spacing
+  // spacing: the main value covers every gap; a gap with its own value replaces it there
   let gaps: number[] | null = null;
+  const gapEcho: string[] = [];
+  const badGaps: number[] = [];
   if (Number.isFinite(devices)) {
-    if (devices === 1) gaps = [];
-    else if (!d.spacing.trim()) complete = false;
-    else {
+    const n = devices - 1;
+    let base: (number | null)[] = Array(n).fill(null);
+    if (n > 0 && d.spacing.trim()) {
       const p = parseSpacings(d.spacing);
       if (p.bad.length) errors.spacing = `"${p.bad[0]}" isn't a length — try 2'-6" or 30"`;
       else if (p.gaps.some(g => !(g > 0))) errors.spacing = 'Spacing must be more than zero';
-      else if (p.gaps.length === 1) { gaps = Array(devices - 1).fill(p.gaps[0]); echo.spacing = `${formatLength(p.gaps[0])} between each`; }
-      else if (p.gaps.length === devices - 1) {
-        gaps = p.gaps;
-        echo.spacing = `${formatLength(p.gaps.reduce((a, b) => a + b, 0))} from first to last`;
-      } else errors.spacing = `${devices} devices have ${devices - 1} gaps — type one spacing for all, or ${devices - 1} separated by commas`;
+      else if (p.gaps.length === 1) base = Array(n).fill(p.gaps[0]);
+      else if (p.gaps.length === n) base = p.gaps;
+      else errors.spacing = `${devices} devices have ${n} gaps — type one spacing for all, or ${n} separated by commas`;
+    }
+    const final = base.slice();
+    const typed = d.gaps || [];
+    let own = 0;
+    for (let i = 0; i < n; i++) {
+      const t = (typed[i] || '').trim();
+      if (!t) continue;
+      const v = parseLength(t, 'in');
+      if (v === null || !(v > 0)) { badGaps.push(i); continue; }
+      final[i] = v;
+      own++;
+    }
+    if (badGaps.length) {
+      const i = badGaps[0];
+      errors.gaps = `Gap ${i + 1} → ${i + 2}: "${(typed[i] || '').trim()}" isn't a length — try 2'-6" or 30"`;
+    }
+    for (let i = 0; i < n; i++) gapEcho.push(final[i] === null ? '' : formatLength(final[i] as number));
+    if (!errors.spacing && !errors.gaps) {
+      if (final.every(g => g !== null)) {
+        gaps = final as number[];
+        if (n > 0) {
+          const same = gaps.every(g => g === gaps![0]);
+          echo.spacing = same
+            ? `${formatLength(gaps[0])} between each`
+            : `${formatLength(gaps.reduce((x, y) => x + y, 0))} from first to last`;
+          if (own) echo.spacing += ` · ${own} gap${own === 1 ? '' : 's'} set individually`;
+        }
+      } else complete = false;   // at least one gap has no spacing yet
     }
   }
 
@@ -359,6 +430,20 @@ export function resolveDraft(d: BuildDraft): DraftResult {
     }
   }
 
+  // whip at the fed end(s) — blank means the wire is end capped there
+  let whipIn: number | null = null;
+  if ((d.whip || '').trim()) {
+    const v = parseLength(d.whip, 'ft');
+    if (v === null || !(v > 0)) errors.whip = `Type the whip length like 6' or 6'-6" — or leave it blank for an end cap`;
+    else if (v > MAX_WHIP_IN) errors.whip = `Longest whip is ${formatLength(MAX_WHIP_IN)}`;
+    else whipIn = v;
+  }
+  if (!errors.whip) {
+    echo.whip = whipIn === null
+      ? 'No whip — the wire is end capped'
+      : `${formatLength(whipIn)} whip at ${d.feed === 'both' ? 'each end' : `the ${d.feed} end`}`;
+  }
+
   // wire
   if (!d.conductors.length) errors.wire = 'Add at least one conductor';
   else if (d.conductors.length > MAX_CONDUCTORS) errors.wire = `Up to ${MAX_CONDUCTORS} conductors`;
@@ -368,12 +453,12 @@ export function resolveDraft(d: BuildDraft): DraftResult {
     const colors = Array.from({ length: devices }, (_, i) =>
       isDeviceColor(d.colors[i]) ? d.colors[i] : isDeviceColor(d.deviceColor) ? d.deviceColor : DEFAULT_DEVICE_COLOR);
     const chk = checkBuild({
-      label: d.label, qty, lengthIn, devices, gapsIn: gaps, startIn, deviceColors: colors, feed: d.feed,
+      label: d.label, qty, lengthIn, devices, gapsIn: gaps, startIn, deviceColors: colors, feed: d.feed, whipIn,
       wire: { type: d.wireType, size: d.wireSize, conductors: d.conductors }
     });
     if (chk.ok) build = chk.build; else errors.wire = chk.error;
   }
-  return { build, errors, echo, complete };
+  return { build, errors, echo, gapEcho, badGaps, complete };
 }
 
 // ── the to-scale drawing ──
@@ -434,20 +519,22 @@ export function wiremoldGeometry(b: WiremoldBuild): Geometry {
 export interface CutLine { type: string; size: WireSize; color: WireColor; pieces: number; inches: number; }
 export interface TicketTotals { builds: number; runs: number; devices: number; wireInches: number; lines: CutLine[]; }
 
-// Every conductor is cut to the length of the run, times the quantity.
+// Every conductor is cut to conductorLength() — run + a foot per device + any
+// whip — once for each run in the quantity.
 export function ticketTotals(builds: WiremoldBuild[]): TicketTotals {
   const acc = new Map<string, CutLine>();
   let runs = 0, devices = 0, wireInches = 0;
   for (const b of builds) {
     runs += b.qty;
     devices += b.devices * b.qty;
+    const each = conductorLength(b).totalIn;
     for (const c of b.wire.conductors) {
       const key = `${b.wire.type}|${b.wire.size}|${c.color}`;
       const line = acc.get(key) || { type: b.wire.type, size: b.wire.size, color: wireColor(c.color), pieces: 0, inches: 0 };
       line.pieces += b.qty;
-      line.inches += b.lengthIn * b.qty;
+      line.inches += each * b.qty;
       acc.set(key, line);
-      wireInches += b.lengthIn * b.qty;
+      wireInches += each * b.qty;
     }
   }
   const colorOrder = (k: string) => WIRE_COLORS.findIndex(c => c.key === k);
