@@ -5,12 +5,12 @@ import { api } from '../lib/api';
 import { WiremoldFigure } from './WiremoldDiagram';
 import {
   FEED_ENDS, DEVICE_COLORS, WIRE_COLORS, WIRE_TYPES, WIRE_SIZES, ROLES, WIRE_PRESETS, WM_STATUSES,
-  SERIES, CHANNELS, DEVICE_TYPES, MEASURES, MAX_DEVICES, MAX_CONDUCTORS, MAX_BUILDS,
-  seriesDef, seriesLabel, fillBuild, isDeviceType,
+  SERIES, CHANNELS, DEVICE_TYPES, MEASURES, PLACES, MAX_DEVICES, MAX_CONDUCTORS, MAX_BUILDS,
+  seriesDef, seriesLabel, fillBuild, isDeviceType, isPlace, conductorLength,
   deviceColor, wireColor, resolveDraft, emptyBuildDraft, ticketTotals, layoutBuild, formatLength,
   fmtFeetDecimal, sizeLabel, isDeviceColor, isRole, isWireColor, wireLengthText,
   type BuildDraft, type DraftResult, type WiremoldBuild, type WiremoldTicket, type TicketTotals, type WireRole,
-  type DeviceType
+  type DeviceType, type Place
 } from '../data/wiremold';
 import '../styles/wiremold.css';
 
@@ -85,6 +85,8 @@ function cleanBuildDraft(raw: any): BuildDraft {
   d.horizontal = raw.horizontal === true;
   d.deviceType = raw.deviceType === 'double' ? 'double' : 'duplex';
   d.types = Array.isArray(raw.types) ? raw.types.map((t: unknown) => (isDeviceType(t) ? t : '')) : [];
+  d.place = raw.place === 'bottom' ? 'bottom' : 'top';
+  d.places = Array.isArray(raw.places) ? raw.places.map((x: unknown) => (isPlace(x) ? x : '')) : [];
   d.boxDuplex = typeof raw.boxDuplex === 'string' ? raw.boxDuplex : '';
   d.boxDouble = typeof raw.boxDouble === 'string' ? raw.boxDouble : '';
   // A draft typed before spacing could be measured two ways was center to center;
@@ -128,6 +130,9 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
   const ownGaps = (d.gaps || []).slice(0, gapCount).filter(g => (g || '').trim()).length;
   const between = d.measure === 'clear';
   const typeOf = (k: number): DeviceType => (isDeviceType((d.types || [])[k]) ? (d.types[k] as DeviceType) : d.deviceType);
+  const isDouble = d.channels === 2;
+  const allPlace: Place = d.place === 'bottom' ? 'bottom' : 'top';
+  const placeOf = (k: number): Place => (isPlace((d.places || [])[k]) ? (d.places[k] as Place) : allPlace);
   const anyDouble = deviceCount > 0
     ? Array.from({ length: deviceCount }, (_, k) => typeOf(k)).includes('double')
     : d.deviceType === 'double';
@@ -180,6 +185,23 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
               </div>
             </div>
           </div>
+
+          {/* a double has two channels: which one the devices sit in */}
+          {isDouble && (
+            <div className="wm-f">
+              <span className="wm-lbl">Devices sit in</span>
+              <div className="wm-seg" role="group" aria-label={`${p} device channel`}>
+                {PLACES.map(x => (
+                  <button key={x.v} type="button" aria-pressed={allPlace === x.v} className={'chip' + (allPlace === x.v ? ' sel' : '')}
+                    onClick={() => onPatch({ place: x.v, places: [] })}>{x.label}</button>
+                ))}
+              </div>
+              <div className="wm-help">
+                Moves every device. To put some in the top and some in the bottom, use “Set the color, type and channel
+                of each device” below. Wire is run in each channel that has a device.
+              </div>
+            </div>
+          )}
 
           {/* 1 + 2: length and device count */}
           <div className="wm-pair">
@@ -310,11 +332,13 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
             <div className="wm-help">Applies to every device. Ivory is the standard face color.</div>
             {deviceCount > 0 && (
               <button type="button" className="wm-linkbtn" onClick={() => onPatch({ each: !d.each })}>
-                {d.each ? 'Hide the color and type of each device' : 'Set the color and type of each device'}
+                {d.each
+                  ? (isDouble ? 'Hide the color, type and channel of each device' : 'Hide the color and type of each device')
+                  : (isDouble ? 'Set the color, type and channel of each device' : 'Set the color and type of each device')}
               </button>
             )}
             {d.each && deviceCount > 0 && (
-              <div className="wm-each wide">
+              <div className={'wm-each wide' + (isDouble ? ' wider' : '')}>
                 {Array.from({ length: deviceCount }, (_, k) => {
                   const key = isDeviceColor(d.colors[k]) ? d.colors[k] : d.deviceColor;
                   return (
@@ -339,6 +363,17 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
                         }}>
                         {DEVICE_TYPES.map(t => <option key={t.v} value={t.v}>{t.label}</option>)}
                       </select>
+                      {isDouble && (
+                        <select aria-label={`${p} device ${k + 1} channel`} value={placeOf(k)}
+                          onChange={ev => {
+                            const places = (d.places || []).slice();
+                            while (places.length < deviceCount) places.push('');
+                            places[k] = ev.target.value;
+                            onPatch({ places });
+                          }}>
+                          {PLACES.map(x => <option key={x.v} value={x.v}>{x.v === 'top' ? 'Top' : 'Bottom'}</option>)}
+                        </select>
+                      )}
                     </div>
                   );
                 })}
@@ -563,6 +598,8 @@ function BuildDetail({ b: raw, n }: { b: WiremoldBuild; n: number }) {
   const nDuplex = b.devices - nDouble;
   const sizeOf = (t: DeviceType) => Array.from(new Set(b.widthsIn.filter((_, i) => b.deviceTypes[i] === t))).map(formatLength).join(' / ');
   const typed = b.measure === 'clear';
+  const wire = conductorLength(b);
+  const nBottom = b.places.filter(x => x === 'bottom').length;
   return (
     <div className="wm-detail-build">
       <div className="wm-detail-hd">
@@ -574,6 +611,16 @@ function BuildDetail({ b: raw, n }: { b: WiremoldBuild; n: number }) {
         <dl className="wm-spec">
           <dt>Series</dt><dd>{seriesLabel(b.series)}</dd>
           <dt>Raceway</dt><dd>{b.channels === 2 ? 'Double (two-channel)' : 'Single'}</dd>
+          {b.channels === 2 && (
+            <>
+              <dt>Channel</dt>
+              <dd>
+                {nBottom === 0 ? 'All devices in the top channel'
+                  : nBottom === b.devices ? 'All devices in the bottom channel'
+                    : `${b.devices - nBottom} in the top · ${nBottom} in the bottom`}
+              </dd>
+            </>
+          )}
           <dt>Length</dt><dd>{formatLength(b.lengthIn)}</dd>
           <dt>Devices</dt>
           <dd>{b.devices} — {[nDuplex ? `${nDuplex} duplex` : '', nDouble ? `${nDouble} double duplex` : ''].filter(Boolean).join(', ')}</dd>
@@ -601,7 +648,9 @@ function BuildDetail({ b: raw, n }: { b: WiremoldBuild; n: number }) {
               <div key={i}><WireSwatch colorKey={c.color} />{c.role[0].toUpperCase() + c.role.slice(1)} · {wireColor(c.color).label}</div>
             ))}
             <div style={{ color: 'var(--color-neutral-600)', fontWeight: 400 }}>
-              Cut {b.wire.conductors.length} × {wireLengthText(b)}{b.qty > 1 ? ` · ${b.qty} runs` : ''}
+              {wire.sets.length > 1
+                ? `Cut ${b.wire.conductors.length} for each channel — ${wireLengthText(b)}`
+                : `Cut ${b.wire.conductors.length} × ${wireLengthText(b)}`}{b.qty > 1 ? ` · ${b.qty} runs` : ''}
             </div>
           </dd>
         </dl>
@@ -616,7 +665,9 @@ function BuildDetail({ b: raw, n }: { b: WiremoldBuild; n: number }) {
               <span className="p">
                 {' '}{formatLength(at)} <small>to center · box {formatLength(lay.lefts[i])} to {formatLength(lay.rights[i])} from the left end</small>
               </span>
-              <span className="wm-devkind">{b.deviceTypes[i] === 'double' ? 'Double duplex' : 'Duplex'}</span>
+              <span className="wm-devkind">
+                {b.deviceTypes[i] === 'double' ? 'Double duplex' : 'Duplex'}{b.channels === 2 ? ` · ${b.places[i] === 'bottom' ? 'Bottom' : 'Top'}` : ''}
+              </span>
               <i className="wm-sw" style={{ background: c.hex }} aria-hidden="true" />{colorText(c)}
             </div>
           );

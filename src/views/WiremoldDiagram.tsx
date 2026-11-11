@@ -1,14 +1,16 @@
 import {
-  wiremoldGeometry, fillBuild, formatLength, wireColor, wireLengthText, seriesLabel,
+  wiremoldGeometry, fillBuild, formatLength, wireColor, wireLengthText, wiredChannels, seriesLabel,
   FEED_ENDS, DEVICE_COLORS, sizeLabel,
-  type WiremoldBuild, type WireColor, type DeviceType, type DeviceColor
+  type WiremoldBuild, type WireColor, type DeviceType, type DeviceColor, type Place
 } from '../data/wiremold';
 
 // To-scale shop sketch of one wiremold build, drawn from wiremoldGeometry().
 // Along the run everything is true to scale — the length, each box's length,
 // and the spacing. Up and down it is a diagram: the raceway is a bar (two
-// stacked channels when it is a double), and a box is drawn standing up or
-// lying along the raceway. A long run wraps onto extra rows (up to 20 ft each).
+// stacked channels when it is a double), a box is drawn standing up or lying
+// along the raceway, and on a double each box sits in the channel it was put
+// in. Wire is drawn in every channel that has a device. A long run wraps onto
+// extra rows (up to 20 ft each).
 
 const W = 940;            // drawing width
 const PADX = 72;          // room beside the run for the feed arrow and its whip / end-cap label
@@ -27,8 +29,8 @@ const hair = 'var(--color-neutral-400)';
 // One device box. `units` is 1 for a duplex, 2 for a double duplex; each unit
 // shows its two outlets — stacked when the box stands up, side by side when it
 // lies along the raceway.
-function DeviceBox({ cx, cy, w, h, type, horizontal, color }: {
-  cx: number; cy: number; w: number; h: number; type: DeviceType; horizontal: boolean; color: DeviceColor;
+function DeviceBox({ cx, cy, w, h, type, horizontal, color, place }: {
+  cx: number; cy: number; w: number; h: number; type: DeviceType; horizontal: boolean; color: DeviceColor; place: Place;
 }) {
   const units = type === 'double' ? 2 : 1;
   const unitW = w / units;
@@ -44,17 +46,18 @@ function DeviceBox({ cx, cy, w, h, type, horizontal, color }: {
         marks.push(<circle key={`c${u}`} cx={ux} cy={cy} r={1.4} fill={color.ink} opacity={0.6} />);
       }
     } else {
-      const ow = Math.min(9, unitW - 5);
-      if (ow >= 3) {
-        marks.push(<rect key={`a${u}`} x={ux - ow / 2} y={y0 + 7} width={ow} height={13} rx={2} fill={color.ink} opacity={0.42} />);
-        marks.push(<rect key={`b${u}`} x={ux - ow / 2} y={y0 + h - 20} width={ow} height={13} rx={2} fill={color.ink} opacity={0.42} />);
+      // two outlets stacked, sized to the box so they never run into each other
+      const ow = Math.min(9, unitW - 5), oh = Math.min(13, (h - 18) / 2);
+      if (ow >= 3 && oh >= 3) {
+        marks.push(<rect key={`a${u}`} x={ux - ow / 2} y={y0 + 6} width={ow} height={oh} rx={2} fill={color.ink} opacity={0.42} />);
+        marks.push(<rect key={`b${u}`} x={ux - ow / 2} y={y0 + h - 6 - oh} width={ow} height={oh} rx={2} fill={color.ink} opacity={0.42} />);
         marks.push(<circle key={`c${u}`} cx={ux} cy={cy} r={1.6} fill={color.ink} opacity={0.6} />);
       }
     }
   }
   return (
     <g>
-      <rect className="wm-dev-box" data-type={type} x={x0} y={y0} width={w} height={h} rx={2.5}
+      <rect className="wm-dev-box" data-type={type} data-place={place} x={x0} y={y0} width={w} height={h} rx={2.5}
         fill={color.hex} stroke="#201e1d" strokeWidth={1.5} />
       {units === 2 && unitW >= 5 && (
         <line x1={cx} y1={y0 + 3} x2={cx} y2={y0 + h - 3} stroke={color.ink} strokeWidth={1} opacity={0.45} />
@@ -76,16 +79,19 @@ export function WiremoldDiagram({ build: raw }: { build: WiremoldBuild }) {
   const shift = nRows > 1 ? 0 : -26;          // a single row has no caption line above it
   const H = TOP + shift + nRows * ROW_H + 4;
 
-  // The raceway: one channel, or two stacked. Wire and boxes that lie along the
-  // raceway sit in the top channel; a box standing up spans the raceway.
+  // The raceway: one channel, or two stacked. On a double every box sits in its
+  // own channel — top or bottom — and wire runs in each channel that has one.
   const double = g.channels === 2;
   const chH = double ? 22 : 28;
   const barH = chH * g.channels;
   const barTop = BAR_CY - barH / 2;
-  const wireCy = barTop + chH / 2;             // centerline of the channel that carries the wire
-  const boxH = g.horizontal ? chH + 8 : DEV_H;
-  const boxCy = g.horizontal ? wireCy : BAR_CY;
-  const boxTop = boxCy - boxH / 2;
+  const chTop = (place: Place) => barTop + (double && place === 'bottom' ? chH : 0);
+  const chCy = (place: Place) => chTop(place) + chH / 2;
+  // A box lying along the raceway just covers its channel. Standing up, it
+  // fills a single raceway; on a double it stands in its channel, a little proud of it.
+  const boxH = g.horizontal ? chH + 8 : double ? chH + 14 : DEV_H;
+  const boxCy = (place: Place) => (double ? chCy(place) : BAR_CY);
+  const feedCy = g.wired.length === 1 ? chCy(g.wired[0]) : BAR_CY;   // into the wired channel, or between the two
   const labelY = BAR_CY + DEV_H / 2 + 16;      // device numbers share one baseline
 
   const X = (row: number, inches: number) => x0 + (inches - g.rows[row].from) * pxIn;
@@ -133,12 +139,12 @@ export function WiremoldDiagram({ build: raw }: { build: WiremoldBuild }) {
               <line className="wm-divider" x1={xl} y1={y(barTop + chH)} x2={xr} y2={y(barTop + chH)} style={{ stroke: muted }} strokeWidth={1.2} />
             )}
 
-            {/* conductors running the length of the run */}
-            {conductors.map((c, i) => {
-              const cy = y(barTop + ((i + 1) * chH) / (conductors.length + 1));
+            {/* conductors running the length of the run, in every channel that has a device */}
+            {g.wired.map(place => conductors.map((c, i) => {
+              const cy = y(chTop(place) + ((i + 1) * chH) / (conductors.length + 1));
               const col: WireColor = wireColor(c.color);
               return (
-                <g key={i}>
+                <g key={`${place}-${i}`} className="wm-wire" data-place={place}>
                   <line x1={xl + 2} y1={cy} x2={xr - 2} y2={cy} stroke="rgba(32,30,29,.55)" strokeWidth={3.6} strokeLinecap="round" />
                   <line x1={xl + 2} y1={cy} x2={xr - 2} y2={cy} stroke={col.hex} strokeWidth={2.2} strokeLinecap="round" />
                   {col.tracer && (
@@ -146,15 +152,15 @@ export function WiremoldDiagram({ build: raw }: { build: WiremoldBuild }) {
                   )}
                 </g>
               );
-            })}
+            }))}
 
             {/* break marks where a long run wraps */}
             {!isFirst && <path d={`M ${xl - 3},${y(barTop - 5)} L ${xl + 3},${y(barTop + barH + 5)}`} style={{ stroke: muted }} strokeWidth={2} />}
             {!isLast && <path d={`M ${xr - 3},${y(barTop - 5)} L ${xr + 3},${y(barTop + barH + 5)}`} style={{ stroke: muted }} strokeWidth={2} />}
 
             {/* feed: a whip, or the wire end capped */}
-            {isFirst && feedLeft && <FeedArrow x={xl} cy={y(wireCy)} capTop={y(barTop - 5)} capH={barH + 10} dir="right" whipIn={build.whipIn} />}
-            {isLast && feedRight && <FeedArrow x={xr} cy={y(wireCy)} capTop={y(barTop - 5)} capH={barH + 10} dir="left" whipIn={build.whipIn} />}
+            {isFirst && feedLeft && <FeedArrow x={xl} cy={y(feedCy)} capTop={y(barTop - 5)} capH={barH + 10} dir="right" whipIn={build.whipIn} />}
+            {isLast && feedRight && <FeedArrow x={xr} cy={y(feedCy)} capTop={y(barTop - 5)} capH={barH + 10} dir="left" whipIn={build.whipIn} />}
 
             {/* dimensions: one line per piece, its text printed once */}
             {segs.map(({ s, i }) => {
@@ -180,7 +186,7 @@ export function WiremoldDiagram({ build: raw }: { build: WiremoldBuild }) {
             {devs.map(d => {
               const at = g.measure === 'clear' ? [d.left, d.right] : [d.at];
               return at.map((inch, k) => (
-                <line key={`e${d.index}-${k}`} x1={X(r.index, inch)} y1={y(DIM_Y)} x2={X(r.index, inch)} y2={y(boxTop)}
+                <line key={`e${d.index}-${k}`} x1={X(r.index, inch)} y1={y(DIM_Y)} x2={X(r.index, inch)} y2={y(boxCy(d.place) - boxH / 2)}
                   style={{ stroke: hair }} strokeWidth={1} />
               ));
             })}
@@ -195,8 +201,8 @@ export function WiremoldDiagram({ build: raw }: { build: WiremoldBuild }) {
               const posLabel = formatLength(d.at);
               return (
                 <g key={'d' + d.index}>
-                  <DeviceBox cx={cx} cy={y(boxCy)} w={Math.max(MIN_BOX_PX, d.widthIn * pxIn)} h={boxH}
-                    type={d.type} horizontal={g.horizontal} color={d.color} />
+                  <DeviceBox cx={cx} cy={y(boxCy(d.place))} w={Math.max(MIN_BOX_PX, d.widthIn * pxIn)} h={boxH}
+                    type={d.type} horizontal={g.horizontal} color={d.color} place={d.place} />
                   {neighbor >= 14 && (
                     <text x={cx} y={y(labelY)} textAnchor="middle" style={{ fill: ink }} fontSize={12} fontWeight={800}
                       fontFamily="var(--font-heading)">{d.index + 1}</text>
@@ -280,6 +286,11 @@ export function WiremoldFigure({ build: raw }: { build: WiremoldBuild }) {
             <span key={k.type} className="wm-key"><b>{k.n} {k.label}</b>&nbsp;· {k.size} each</span>
           ))}
           <span className="wm-key">{build.horizontal ? 'turned along the raceway' : 'standing up'}</span>
+          {build.channels === 2 && (
+            <span className="wm-key">
+              <b>{wiredChannels(build).map(c => `${c.devices} in the ${c.place} channel`).join(' · ')}</b>
+            </span>
+          )}
           <span className="wm-note">Spacing shown {build.measure === 'clear' ? 'between boxes' : 'center to center'}</span>
         </div>
         <div className="wm-legend-row">

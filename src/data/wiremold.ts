@@ -3,7 +3,8 @@
 //
 // A TICKET holds many BUILDS, the same way a pull sheet holds many boxes. Each
 // build is one run of raceway:
-//   • the wiremold series, and whether it is single or double (two-channel)
+//   • the wiremold series, and whether it is single or double (two-channel);
+//     on a double, each device box sits in the top channel or the bottom one
 //   • length of the run
 //   • the device boxes: duplex or double duplex, standing up or turned to run
 //     along the raceway — which sets how much of the run each box takes up
@@ -13,7 +14,9 @@
 //   • the wire: type, size, and the color of every conductor
 //
 // Wire is cut longer than the run: every device adds a foot to each conductor,
-// and a whip adds its own length at each fed end.
+// and a whip adds its own length at each fed end. The two channels of a double
+// are separate wiring spaces, so each channel that has devices gets its own set
+// of conductors.
 //
 // Spacing is ONE value used between every pair of devices; any single gap can
 // be given its own spacing, which replaces the main one for that gap only (the
@@ -61,6 +64,14 @@ export const MEASURES: { v: Measure; label: string }[] = [
   { v: 'clear', label: 'Between boxes' },
   { v: 'center', label: 'Center to center' }
 ];
+// Which channel of a double raceway a device box sits in. (On a single there is
+// only one, and it is called the top.)
+export type Place = 'top' | 'bottom';
+export const PLACES: { v: Place; label: string }[] = [
+  { v: 'top', label: 'Top channel' },
+  { v: 'bottom', label: 'Bottom channel' }
+];
+export const isPlace = (p: unknown): p is Place => p === 'top' || p === 'bottom';
 export const CHANNELS: { v: 1 | 2; label: string }[] = [
   { v: 1, label: 'Single' },
   { v: 2, label: 'Double' }
@@ -255,6 +266,7 @@ export interface WiremoldBuild {
   devices: number;
   horizontal: boolean;         // device boxes turned to run along the raceway
   deviceTypes: DeviceType[];   // one per device
+  places: Place[];             // one per device: top or bottom channel (always top on a single)
   widthsIn: number[];          // one per device: how much of the run its box takes up
   measure: Measure;            // how the spacing was typed — the drawing dimensions it the same way
   gapsIn: number[];            // devices - 1 gaps, CENTER TO CENTER, inches
@@ -265,27 +277,60 @@ export interface WiremoldBuild {
   wire: WireSpec;
 }
 
-// How long each conductor is cut for one run of a build.
+// Which channels have devices in them — top first. A single raceway, and any
+// ticket from before channels existed, is just the top.
+export interface WiredChannel { place: Place; devices: number; }
+export function wiredChannels(b: { devices: number; channels?: number; places?: Place[] }): WiredChannel[] {
+  if (b.channels !== 2 || !Array.isArray(b.places)) return [{ place: 'top', devices: b.devices }];
+  const bottom = b.places.filter(p => p === 'bottom').length;
+  const out: WiredChannel[] = [];
+  if (b.devices - bottom) out.push({ place: 'top', devices: b.devices - bottom });
+  if (bottom) out.push({ place: 'bottom', devices: bottom });
+  return out;
+}
+
+// How long each conductor is cut for one run of a build. Each channel that has
+// devices gets its own set of conductors: the run + a foot for every device in
+// that channel + the whip. With one channel in use that is simply
+// run + a foot per device + whip.
 export const feedCount = (feed: FeedEnd) => (feed === 'both' ? 2 : 1);
+export interface WireSet { place: Place; devices: number; totalIn: number; }
 export interface WireLength {
-  runIn: number;       // the run itself
+  runIn: number;       // the run itself (once for each set)
   devicesIn: number;   // a foot for every device
-  whipIn: number;      // the whip(s) — both ends fed means two
+  whipIn: number;      // the whip(s) — both ends fed means two, and each set has its own
   whips: number;       // how many whips (0 when end capped)
-  totalIn: number;
+  totalIn: number;     // every set added together: what one conductor color needs for one run of the build
+  sets: WireSet[];     // one per channel that has devices
 }
-export function conductorLength(b: Pick<WiremoldBuild, 'lengthIn' | 'devices' | 'feed'> & { whipIn?: number | null }): WireLength {
-  const devicesIn = b.devices * DEVICE_WIRE_IN;
-  const whips = b.whipIn ? feedCount(b.feed) : 0;
-  const whipIn = (b.whipIn || 0) * whips;
-  return { runIn: b.lengthIn, devicesIn, whipIn, whips, totalIn: b.lengthIn + devicesIn + whipIn };
+type WireInput = Pick<WiremoldBuild, 'lengthIn' | 'devices' | 'feed'> & { whipIn?: number | null; channels?: number; places?: Place[] };
+export function conductorLength(b: WireInput): WireLength {
+  const perSetWhips = b.whipIn ? feedCount(b.feed) : 0;
+  const perSetWhipIn = (b.whipIn || 0) * perSetWhips;
+  const sets: WireSet[] = wiredChannels(b).map(c => ({
+    place: c.place, devices: c.devices, totalIn: b.lengthIn + c.devices * DEVICE_WIRE_IN + perSetWhipIn
+  }));
+  return {
+    runIn: b.lengthIn * sets.length,
+    devicesIn: b.devices * DEVICE_WIRE_IN,
+    whipIn: perSetWhipIn * sets.length,
+    whips: perSetWhips * sets.length,
+    totalIn: sets.reduce((n, x) => n + x.totalIn, 0),
+    sets
+  };
 }
-// "23'-0" each — 12'-0" run + 5'-0" for 5 devices + 6'-0" whip"
-export function wireLengthText(b: Pick<WiremoldBuild, 'lengthIn' | 'devices' | 'feed'> & { whipIn?: number | null }): string {
+// One channel:  "23'-0" each — 12'-0" run + 5'-0" for 5 devices + 6'-0" for the whip"
+// Both channels: "top channel 16'-0" each (4 devices) · bottom channel 13'-0" each (1 device) — …"
+export function wireLengthText(b: WireInput): string {
   const w = conductorLength(b);
-  const parts = [`${formatLength(w.runIn)} run`, `${formatLength(w.devicesIn)} for ${b.devices} device${b.devices === 1 ? '' : 's'}`];
-  if (w.whips) parts.push(`${formatLength(w.whipIn)} for ${w.whips === 1 ? 'the whip' : '2 whips'}`);
-  return `${formatLength(w.totalIn)} each — ${parts.join(' + ')}`;
+  const plural = (n: number) => `${n} device${n === 1 ? '' : 's'}`;
+  const perSetWhips = w.sets.length ? w.whips / w.sets.length : 0;
+  const whip = perSetWhips ? ` + ${formatLength(w.whipIn / w.sets.length)} for ${perSetWhips === 1 ? 'the whip' : '2 whips'}` : '';
+  if (w.sets.length === 1) {
+    return `${formatLength(w.totalIn)} each — ${formatLength(b.lengthIn)} run + ${formatLength(w.devicesIn)} for ${plural(b.devices)}${whip}`;
+  }
+  const each = w.sets.map(x => `${x.place} channel ${formatLength(x.totalIn)} each (${plural(x.devices)})`).join(' · ');
+  return `${each} — every channel with devices gets its own set: ${formatLength(b.lengthIn)} run + ${formatLength(DEVICE_WIRE_IN)} per device${whip}`;
 }
 
 // A ticket stored before a field existed simply doesn't have it. This fills in
@@ -296,14 +341,15 @@ export function fillBuild(raw: any): WiremoldBuild {
   const horizontal = raw.horizontal === true;
   const defs = boxDefaults(series, horizontal);
   const deviceTypes: DeviceType[] = Array.from({ length: devices }, (_, i) => (raw.deviceTypes?.[i] === 'double' ? 'double' : 'duplex'));
+  const channels: 1 | 2 = raw.channels === 2 ? 2 : 1;
+  const places: Place[] = Array.from({ length: devices }, (_, i) => (channels === 2 && raw.places?.[i] === 'bottom' ? 'bottom' : 'top'));
   const widthsIn: number[] = Array.from({ length: devices }, (_, i) => {
     const w = raw.widthsIn?.[i];
     return typeof w === 'number' && w > 0 ? w : defs[deviceTypes[i]];
   });
   return {
     ...raw,
-    series, horizontal, deviceTypes, widthsIn,
-    channels: raw.channels === 2 ? 2 : 1,
+    series, horizontal, deviceTypes, widthsIn, channels, places,
     measure: raw.measure === 'clear' ? 'clear' : 'center',   // older tickets were typed center to center
     whipIn: raw.whipIn ?? null
   };
@@ -390,6 +436,13 @@ export function checkBuild(raw: any): BuildCheck {
     if (!Array.isArray(raw.deviceTypes) || raw.deviceTypes.length !== devices || !raw.deviceTypes.every(isDeviceType)) return bad('every device must be duplex or double duplex');
     deviceTypes = raw.deviceTypes;
   }
+  // Top or bottom channel. Only a double has a bottom, so on a single everything is top.
+  let places: Place[] = Array(devices).fill('top');
+  if (raw?.places !== undefined) {
+    if (!Array.isArray(raw.places) || raw.places.length !== devices || !raw.places.every(isPlace)) return bad('every device must be in the top or bottom channel');
+    if (channels === 2) places = raw.places;
+    else if (raw.places.includes('bottom')) return bad('only a double raceway has a bottom channel');
+  }
   const defs = boxDefaults(series, horizontal);
   let widthsIn: number[] = deviceTypes.map(t => defs[t]);
   if (raw?.widthsIn !== undefined) {
@@ -439,7 +492,7 @@ export function checkBuild(raw: any): BuildCheck {
   return {
     ok: true,
     build: {
-      label, qty, series, channels, lengthIn, devices, horizontal, deviceTypes, widthsIn, measure,
+      label, qty, series, channels, lengthIn, devices, horizontal, deviceTypes, places, widthsIn, measure,
       gapsIn, startIn, deviceColors: colorsRaw as string[],
       feed: raw.feed, whipIn, wire: { type, size: w.size, conductors }
     }
@@ -456,6 +509,8 @@ export interface BuildDraft {
   devices: string;
   deviceType: DeviceType;  // type of every device…
   types: string[];         // …unless this has an entry for that device
+  place: Place;            // on a double: the channel every device sits in…
+  places: string[];        // …unless this has an entry for that device
   horizontal: boolean;     // boxes turned to run along the raceway
   boxDuplex: string;       // how much of the run a duplex box takes; blank = the standard size
   boxDouble: string;       // same, for a double duplex
@@ -476,7 +531,7 @@ export interface BuildDraft {
 
 export const emptyBuildDraft = (): BuildDraft => ({
   label: '', qty: '1', series: '', channels: 1, length: '', devices: '',
-  deviceType: 'duplex', types: [], horizontal: false, boxDuplex: '', boxDouble: '',
+  deviceType: 'duplex', types: [], place: 'top', places: [], horizontal: false, boxDuplex: '', boxDouble: '',
   measure: 'clear', spacing: '', gaps: [], eachGap: false, start: '', feed: 'left', whip: '',
   deviceColor: DEFAULT_DEVICE_COLOR, colors: [], each: false,
   wireType: DEFAULT_WIRE_TYPE, wireSize: DEFAULT_WIRE_SIZE,
@@ -549,6 +604,14 @@ export function resolveDraft(d: BuildDraft): DraftResult {
     const own = d.types || [];
     deviceTypes = Array.from({ length: devices }, (_, i) => (isDeviceType(own[i]) ? own[i] as DeviceType : all));
     widthsIn = deviceTypes.map(t => size[t]);
+  }
+
+  // on a double, the channel each device sits in (a single has only the top)
+  let places: Place[] = [];
+  if (Number.isFinite(devices)) {
+    const all: Place = d.place === 'bottom' ? 'bottom' : 'top';
+    const own = d.places || [];
+    places = Array.from({ length: devices }, (_, i) => (channels === 2 ? (isPlace(own[i]) ? own[i] as Place : all) : 'top'));
   }
 
   // spacing: the main value covers every gap; a gap with its own value replaces it there.
@@ -654,7 +717,7 @@ export function resolveDraft(d: BuildDraft): DraftResult {
     const colors = Array.from({ length: devices }, (_, i) =>
       isDeviceColor(d.colors[i]) ? d.colors[i] : isDeviceColor(d.deviceColor) ? d.deviceColor : DEFAULT_DEVICE_COLOR);
     const chk = checkBuild({
-      label: d.label, qty, series, channels, lengthIn, devices, horizontal, deviceTypes, widthsIn, measure,
+      label: d.label, qty, series, channels, lengthIn, devices, horizontal, deviceTypes, places, widthsIn, measure,
       gapsIn: gaps, startIn, deviceColors: colors, feed: d.feed, whipIn,
       wire: { type: d.wireType, size: d.wireSize, conductors: d.conductors }
     });
@@ -678,6 +741,7 @@ export interface GeoDevice {
   row: number;
   color: DeviceColor;
   type: DeviceType;
+  place: Place;              // top or bottom channel
 }
 export interface GeoSegment {
   kind: 'lead' | 'gap' | 'tail';
@@ -696,6 +760,7 @@ export interface Geometry {
   measure: Measure;          // dimensions run box edge to box edge, or center to center
   channels: 1 | 2;
   horizontal: boolean;
+  wired: Place[];            // the channels that carry wire — the ones with devices in them
 }
 
 export function wiremoldGeometry(raw: WiremoldBuild): Geometry {
@@ -708,7 +773,7 @@ export function wiremoldGeometry(raw: WiremoldBuild): Geometry {
   const layout = layoutBuild(b);
   const devices: GeoDevice[] = layout.positions.map((at, i) => ({
     index: i, at, left: layout.lefts[i], right: layout.rights[i], widthIn: b.widthsIn[i],
-    row: rowOf(at), color: deviceColor(b.deviceColors[i]), type: b.deviceTypes[i]
+    row: rowOf(at), color: deviceColor(b.deviceColors[i]), type: b.deviceTypes[i], place: b.places[i]
   }));
 
   // A dimension runs from `a` to `z`; draw a piece of it on every row it crosses.
@@ -733,7 +798,10 @@ export function wiremoldGeometry(raw: WiremoldBuild): Geometry {
   }
   addDim('tail', edge ? layout.rights[last] : layout.positions[last], b.lengthIn);
 
-  return { lengthIn: b.lengthIn, rows, devices, segments: segs, layout, measure: b.measure, channels: b.channels, horizontal: b.horizontal };
+  return {
+    lengthIn: b.lengthIn, rows, devices, segments: segs, layout, measure: b.measure, channels: b.channels,
+    horizontal: b.horizontal, wired: wiredChannels(b).map(c => c.place)
+  };
 }
 
 // ── wire to cut ──
@@ -748,11 +816,13 @@ export function ticketTotals(builds: WiremoldBuild[]): TicketTotals {
   for (const b of builds) {
     runs += b.qty;
     devices += b.devices * b.qty;
-    const each = conductorLength(b).totalIn;
+    const wl = conductorLength(b);
+    const each = wl.totalIn;               // every set of this color, for one run
+    const sets = wl.sets.length;           // one piece per channel that has devices
     for (const c of b.wire.conductors) {
       const key = `${b.wire.type}|${b.wire.size}|${c.color}`;
       const line = acc.get(key) || { type: b.wire.type, size: b.wire.size, color: wireColor(c.color), pieces: 0, inches: 0 };
-      line.pieces += b.qty;
+      line.pieces += b.qty * sets;
       line.inches += each * b.qty;
       acc.set(key, line);
       wireInches += each * b.qty;

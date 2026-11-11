@@ -127,3 +127,6 @@
 .wm-asentered { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--color-neutral-600); margin-left: 4px; }
 .wm-devkind { font-size: 11px; font-weight: 700; color: var(--color-neutral-700); white-space: nowrap; }
 .wm-devs { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+
+/* a double: the per-device row also carries a channel dropdown */
+.wm-each.wide.wider { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
