@@ -112,3 +112,18 @@
 .wm-each-item input { flex: 1; min-width: 0; height: 34px; padding: 0 8px; font-size: 14px; font-weight: 700; border: 1px solid var(--color-neutral-400); background: #fff; color: var(--color-text); }
 .wm-each-item input::placeholder { color: var(--color-neutral-600); font-weight: 600; opacity: 1; }
 .wm-each-item.bad { border-color: var(--color-accent); background: var(--color-accent-100); }
+
+/* device boxes: type, direction, how much of the run a box takes */
+/* (the selector is doubled up so it outranks the small-caps style every other field label gets) */
+.wm-f label.wm-check { display: flex; align-items: center; gap: 10px; margin: 12px 0 0; font-size: 13px; font-weight: 600; cursor: pointer; text-transform: none; letter-spacing: 0; color: var(--color-text); }
+.wm-pair .wm-seg { flex-wrap: nowrap; }
+.wm-pair .wm-seg .chip { min-width: 0; flex: 1 1 0; padding: 0 8px; }
+.wm-f label.wm-check input { width: 22px; height: 22px; margin: 0; flex: none; cursor: pointer; accent-color: var(--color-text); }
+.wm-boxlen { margin-top: 12px; }
+.wm-mini { display: block; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--color-neutral-600); margin-bottom: 4px; }
+.wm-boxlen .input { height: 42px; font-size: 15px; }
+.wm-boxlen .input::placeholder, .wm-f .input::placeholder { color: var(--color-neutral-600); opacity: 1; font-weight: 500; }
+.wm-each.wide { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+.wm-asentered { font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--color-neutral-600); margin-left: 4px; }
+.wm-devkind { font-size: 11px; font-weight: 700; color: var(--color-neutral-700); white-space: nowrap; }
+.wm-devs { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }

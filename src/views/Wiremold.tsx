@@ -5,10 +5,12 @@ import { api } from '../lib/api';
 import { WiremoldFigure } from './WiremoldDiagram';
 import {
   FEED_ENDS, DEVICE_COLORS, WIRE_COLORS, WIRE_TYPES, WIRE_SIZES, ROLES, WIRE_PRESETS, WM_STATUSES,
-  MAX_DEVICES, MAX_CONDUCTORS, MAX_BUILDS,
+  SERIES, CHANNELS, DEVICE_TYPES, MEASURES, MAX_DEVICES, MAX_CONDUCTORS, MAX_BUILDS,
+  seriesDef, seriesLabel, fillBuild, isDeviceType,
   deviceColor, wireColor, resolveDraft, emptyBuildDraft, ticketTotals, layoutBuild, formatLength,
   fmtFeetDecimal, sizeLabel, isDeviceColor, isRole, isWireColor, wireLengthText,
-  type BuildDraft, type DraftResult, type WiremoldBuild, type WiremoldTicket, type TicketTotals, type WireRole
+  type BuildDraft, type DraftResult, type WiremoldBuild, type WiremoldTicket, type TicketTotals, type WireRole,
+  type DeviceType
 } from '../data/wiremold';
 import '../styles/wiremold.css';
 
@@ -64,7 +66,7 @@ const emptyDraft = (): Draft => ({ job: '', needBy: '', priority: 'Standard', no
 
 const isBlankBuild = (d: BuildDraft) =>
   !d.label.trim() && !d.length.trim() && !d.devices.trim() && !d.spacing.trim() && !d.start.trim()
-  && !(d.whip || '').trim() && !(d.gaps || []).some(g => (g || '').trim());
+  && !(d.whip || '').trim() && !(d.gaps || []).some(g => (g || '').trim()) && !d.series;
 
 // A long ticket shouldn't be lost to a dropped tab or a locked phone. Same
 // per-user, per-device draft idea the catalog cart uses.
@@ -78,6 +80,16 @@ function cleanBuildDraft(raw: any): BuildDraft {
   d.gaps = Array.isArray(raw.gaps) ? raw.gaps.map((g: unknown) => (typeof g === 'string' ? g : '')) : [];
   d.eachGap = raw.eachGap === true;
   d.whip = typeof raw.whip === 'string' ? raw.whip : '';
+  d.series = typeof raw.series === 'string' ? raw.series : '';
+  d.channels = raw.channels === 2 ? 2 : 1;
+  d.horizontal = raw.horizontal === true;
+  d.deviceType = raw.deviceType === 'double' ? 'double' : 'duplex';
+  d.types = Array.isArray(raw.types) ? raw.types.map((t: unknown) => (isDeviceType(t) ? t : '')) : [];
+  d.boxDuplex = typeof raw.boxDuplex === 'string' ? raw.boxDuplex : '';
+  d.boxDouble = typeof raw.boxDouble === 'string' ? raw.boxDouble : '';
+  // A draft typed before spacing could be measured two ways was center to center;
+  // keep it meaning what it meant. (New builds start out "between boxes".)
+  d.measure = raw.measure === 'clear' || raw.measure === 'center' ? raw.measure : 'center';
   const cs = Array.isArray(raw.conductors)
     ? raw.conductors.filter((c: any) => isRole(c?.role) && isWireColor(c?.color)).map((c: any) => ({ role: c.role as WireRole, color: c.color as string }))
     : [];
@@ -114,6 +126,11 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
   const e = res.errors;
   const gapCount = Math.max(0, deviceCount - 1);
   const ownGaps = (d.gaps || []).slice(0, gapCount).filter(g => (g || '').trim()).length;
+  const between = d.measure === 'clear';
+  const typeOf = (k: number): DeviceType => (isDeviceType((d.types || [])[k]) ? (d.types[k] as DeviceType) : d.deviceType);
+  const anyDouble = deviceCount > 0
+    ? Array.from({ length: deviceCount }, (_, k) => typeOf(k)).includes('double')
+    : d.deviceType === 'double';
 
   return (
     <section className="wm-build" aria-label={p}>
@@ -134,6 +151,36 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
 
       <div className="wm-build-body">
         <div className="wm-fields">
+          {/* the raceway: series, and single or double */}
+          <div className="wm-pair">
+            <div className="wm-f">
+              <label htmlFor={`wm-ser-${n}`}>Wiremold series</label>
+              <select id={`wm-ser-${n}`} aria-label={`${p} series`} value={d.series}
+                onChange={ev => {
+                  // a series can bring what is known about it (so far, only the Hubbell aluminum one does)
+                  const def = seriesDef(ev.target.value);
+                  onPatch({
+                    series: ev.target.value,
+                    ...(def?.channels ? { channels: def.channels } : {}),
+                    ...(def?.horizontal !== undefined ? { horizontal: def.horizontal } : {})
+                  });
+                }}>
+                <option value="">Choose a series…</option>
+                {SERIES.map(x => <option key={x.v} value={x.v}>{x.label}</option>)}
+              </select>
+              {!d.series && res.build && <div className="wm-why">Choose the series to finish this build</div>}
+            </div>
+            <div className="wm-f">
+              <span className="wm-lbl">Raceway</span>
+              <div className="wm-seg" role="group" aria-label={`${p} raceway`}>
+                {CHANNELS.map(c => (
+                  <button key={c.v} type="button" aria-pressed={d.channels === c.v} className={'chip' + (d.channels === c.v ? ' sel' : '')}
+                    onClick={() => onPatch({ channels: c.v })}>{c.label}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+
           {/* 1 + 2: length and device count */}
           <div className="wm-pair">
             <div className="wm-f">
@@ -150,17 +197,58 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
             </div>
           </div>
 
+          {/* the device boxes: duplex or double duplex, standing up or along the raceway */}
+          <div className="wm-f">
+            <span className="wm-lbl">Device boxes</span>
+            <div className="wm-seg" role="group" aria-label={`${p} device type`}>
+              {DEVICE_TYPES.map(t => (
+                <button key={t.v} type="button" aria-pressed={d.deviceType === t.v} className={'chip' + (d.deviceType === t.v ? ' sel' : '')}
+                  onClick={() => onPatch({ deviceType: t.v, types: [] })}>{t.label}</button>
+              ))}
+            </div>
+            <label className="wm-check">
+              <input type="checkbox" aria-label={`${p} horizontal boxes`} checked={d.horizontal}
+                onChange={ev => onPatch({ horizontal: ev.target.checked })} />
+              Boxes horizontal (turned to run along the raceway)
+            </label>
+            <div className="wm-pair wm-boxlen">
+              <div>
+                <span className="wm-mini">Duplex box takes</span>
+                <input className="input" aria-label={`${p} duplex box length`} placeholder={res.box.duplex} autoComplete="off"
+                  value={d.boxDuplex || ''} onChange={ev => onPatch({ boxDuplex: ev.target.value.slice(0, 20) })} />
+              </div>
+              {anyDouble && (
+                <div>
+                  <span className="wm-mini">Double duplex takes</span>
+                  <input className="input" aria-label={`${p} double duplex box length`} placeholder={res.box.double} autoComplete="off"
+                    value={d.boxDouble || ''} onChange={ev => onPatch({ boxDouble: ev.target.value.slice(0, 20) })} />
+                </div>
+              )}
+            </div>
+            {e.box && <div className="wm-why">{e.box}</div>}
+            <div className="wm-help">How much of the run one box takes up. The gray number is the standard size — type over it if yours differs.</div>
+          </div>
+
           {/* 3: spacing — one value for every gap, and each gap can have its own */}
           <div className="wm-f">
-            <label htmlFor={`wm-sp-${n}`}>Spacing between devices (feet / inches)</label>
+            <span className="wm-lbl">Spacing is measured</span>
+            <div className="wm-seg" role="group" aria-label={`${p} spacing measure`} style={{ marginBottom: 12 }}>
+              {MEASURES.map(m => (
+                <button key={m.v} type="button" aria-pressed={d.measure === m.v} className={'chip' + (d.measure === m.v ? ' sel' : '')}
+                  onClick={() => onPatch({ measure: m.v })}>{m.label}</button>
+              ))}
+            </div>
+            <label htmlFor={`wm-sp-${n}`}>{between ? 'Spacing between device boxes (feet / inches)' : 'Spacing center to center (feet / inches)'}</label>
             <input id={`wm-sp-${n}`} className="input" aria-label={`${p} spacing`} placeholder={`2'-6"`} autoComplete="off"
               value={d.spacing} onChange={ev => onPatch({ spacing: ev.target.value.slice(0, 120) })} />
             {e.spacing ? <div className="wm-why">{e.spacing}</div>
-              : <div className="wm-echo">{deviceCount === 1 ? 'One device — no spacing needed' : res.echo.spacing || ''}</div>}
+              : <div className="wm-echo">{deviceCount === 1 ? 'One device — no spacing needed' : (res.echo.spacing || '') + (res.echo.alt ? ` (${res.echo.alt})` : '')}</div>}
             <div className="wm-help">
               {ownGaps
                 ? 'Used for every gap that doesn’t have its own spacing below.'
-                : 'Used between every pair of devices.'}
+                : between
+                  ? 'The open raceway from the edge of one box to the edge of the next.'
+                  : 'From the center of one device to the center of the next.'}
             </div>
             {gapCount > 0 && (
               <button type="button" className="wm-linkbtn" onClick={() => onPatch({ eachGap: !d.eachGap })}>
@@ -197,11 +285,15 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
 
           {/* where the first device sits */}
           <div className="wm-f">
-            <label htmlFor={`wm-st-${n}`}>First device from the left end (optional)</label>
+            <label htmlFor={`wm-st-${n}`}>{between ? 'Raceway before the first box (optional)' : 'First device from the left end (optional)'}</label>
             <input id={`wm-st-${n}`} className="input" aria-label={`${p} first device`} placeholder="blank = centered on the run" autoComplete="off"
               value={d.start} onChange={ev => onPatch({ start: ev.target.value.slice(0, 20) })} />
             {e.start ? <div className="wm-why">{e.start}</div>
-              : <div className="wm-echo">{res.echo.start ? `${res.echo.start} from the left${res.echo.end ? ` · ${res.echo.end} from the right` : ''}` : ''}</div>}
+              : <div className="wm-echo">{res.echo.start
+                ? (between
+                  ? `${res.echo.start} before the first box${res.echo.end ? ` · ${res.echo.end} after the last` : ''}`
+                  : `${res.echo.start} from the left${res.echo.end ? ` · ${res.echo.end} from the right` : ''}`)
+                : ''}</div>}
           </div>
           {e.fit && <div className="wm-why" role="alert">{e.fit}</div>}
 
@@ -218,11 +310,11 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
             <div className="wm-help">Applies to every device. Ivory is the standard face color.</div>
             {deviceCount > 0 && (
               <button type="button" className="wm-linkbtn" onClick={() => onPatch({ each: !d.each })}>
-                {d.each ? 'Hide the color of each device' : 'Set the color of each device'}
+                {d.each ? 'Hide the color and type of each device' : 'Set the color and type of each device'}
               </button>
             )}
             {d.each && deviceCount > 0 && (
-              <div className="wm-each">
+              <div className="wm-each wide">
                 {Array.from({ length: deviceCount }, (_, k) => {
                   const key = isDeviceColor(d.colors[k]) ? d.colors[k] : d.deviceColor;
                   return (
@@ -237,6 +329,15 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
                           onPatch({ colors });
                         }}>
                         {DEVICE_COLORS.map(c => <option key={c.key} value={c.key}>{colorText(c)}</option>)}
+                      </select>
+                      <select aria-label={`${p} device ${k + 1} type`} value={typeOf(k)}
+                        onChange={ev => {
+                          const types = (d.types || []).slice();
+                          while (types.length < deviceCount) types.push('');
+                          types[k] = ev.target.value;
+                          onPatch({ types });
+                        }}>
+                        {DEVICE_TYPES.map(t => <option key={t.v} value={t.v}>{t.label}</option>)}
                       </select>
                     </div>
                   );
@@ -369,10 +470,12 @@ function TicketForm({ user, flash, onSubmitted }: {
       if (!r.build) {
         const why = !r.complete && !Object.keys(r.errors).length
           ? 'fill in the length, device count and spacing'
-          : (r.errors.fit || r.errors.length || r.errors.devices || r.errors.spacing || r.errors.gaps || r.errors.start || r.errors.whip || r.errors.qty || r.errors.wire || 'fill in the length, device count and spacing');
+          : (r.errors.fit || r.errors.length || r.errors.devices || r.errors.box || r.errors.spacing || r.errors.gaps || r.errors.start || r.errors.whip || r.errors.qty || r.errors.wire || 'fill in the length, device count and spacing');
         flash(`Build ${i + 1}: ${why}`);
         return;
       }
+      // Prefab can't pull material without knowing which raceway it is.
+      if (!draft.builds[i].series) { flash(`Build ${i + 1}: choose the wiremold series`); return; }
     }
     setBusy(true);
     try {
@@ -390,7 +493,7 @@ function TicketForm({ user, flash, onSubmitted }: {
     }
   };
 
-  const incomplete = draft.builds.filter((b, i) => !isBlankBuild(b) && !results[i].build).length;
+  const incomplete = draft.builds.filter((b, i) => !isBlankBuild(b) && (!results[i].build || !b.series)).length;
   const hint = incomplete
     ? { err: true, text: `${incomplete} build${incomplete === 1 ? '' : 's'} not finished yet` }
     : ready.length
@@ -450,11 +553,16 @@ function TicketForm({ user, flash, onSubmitted }: {
 
 // ───────────────────────── prefab list ─────────────────────────
 
-function BuildDetail({ b, n }: { b: WiremoldBuild; n: number }) {
+function BuildDetail({ b: raw, n }: { b: WiremoldBuild; n: number }) {
+  const b = fillBuild(raw);            // tickets sent before a field existed read as they were meant
   const lay = layoutBuild(b);
-  const equal = b.gapsIn.every(g => g === b.gapsIn[0]);
-  const spacing = b.devices === 1 ? '—' : equal ? `${formatLength(b.gapsIn[0])} between each` : b.gapsIn.map(formatLength).join(' · ');
+  const same = (xs: number[]) => xs.every(x => Math.abs(x - xs[0]) < 1e-9);
+  const list = (xs: number[]) => (b.devices === 1 ? '—' : same(xs) ? `${formatLength(xs[0])} each` : xs.map(formatLength).join(' · '));
   const feed = FEED_ENDS.find(f => f.v === b.feed)!.label;
+  const nDouble = b.deviceTypes.filter(t => t === 'double').length;
+  const nDuplex = b.devices - nDouble;
+  const sizeOf = (t: DeviceType) => Array.from(new Set(b.widthsIn.filter((_, i) => b.deviceTypes[i] === t))).map(formatLength).join(' / ');
+  const typed = b.measure === 'clear';
   return (
     <div className="wm-detail-build">
       <div className="wm-detail-hd">
@@ -464,11 +572,25 @@ function BuildDetail({ b, n }: { b: WiremoldBuild; n: number }) {
       </div>
       <div className="wm-detail-grid">
         <dl className="wm-spec">
+          <dt>Series</dt><dd>{seriesLabel(b.series)}</dd>
+          <dt>Raceway</dt><dd>{b.channels === 2 ? 'Double (two-channel)' : 'Single'}</dd>
           <dt>Length</dt><dd>{formatLength(b.lengthIn)}</dd>
-          <dt>Devices</dt><dd>{b.devices}</dd>
-          <dt>Spacing</dt><dd>{spacing}</dd>
-          <dt>First device</dt><dd>{formatLength(lay.startIn)} from the left end{b.startIn === null ? ' (centered)' : ''}</dd>
-          <dt>Last device</dt><dd>{formatLength(lay.endIn)} from the right end</dd>
+          <dt>Devices</dt>
+          <dd>{b.devices} — {[nDuplex ? `${nDuplex} duplex` : '', nDouble ? `${nDouble} double duplex` : ''].filter(Boolean).join(', ')}</dd>
+          <dt>Boxes</dt>
+          <dd>
+            {b.horizontal ? 'Horizontal (along the raceway)' : 'Standing up'}
+            <div style={{ fontWeight: 400 }}>
+              {[nDuplex ? `duplex ${sizeOf('duplex')}` : '', nDouble ? `double duplex ${sizeOf('double')}` : ''].filter(Boolean).join(' · ')} of the run each
+            </div>
+          </dd>
+          <dt>{typed ? 'Between boxes' : 'Center to center'}</dt>
+          <dd>{list(typed ? lay.clear : b.gapsIn)} <span className="wm-asentered">as entered</span></dd>
+          <dt>{typed ? 'Center to center' : 'Between boxes'}</dt>
+          <dd style={{ fontWeight: 400 }}>{list(typed ? b.gapsIn : lay.clear)}</dd>
+          <dt>First box</dt>
+          <dd>starts {formatLength(lay.leadIn)} from the left end{b.startIn === null ? ' (centered)' : ''}</dd>
+          <dt>Last box</dt><dd>ends {formatLength(lay.tailIn)} from the right end</dd>
           <dt>Fed from</dt><dd>{feed}</dd>
           <dt>Whip</dt>
           <dd>{b.whipIn ? `${formatLength(b.whipIn)}${b.feed === 'both' ? ' at each end' : ''}` : 'None — wire end capped'}</dd>
@@ -491,7 +613,10 @@ function BuildDetail({ b, n }: { b: WiremoldBuild; n: number }) {
           return (
             <div className="wm-dev" key={i}>
               <b>#{i + 1}</b>
-              <span className="p">{formatLength(at)} <small>from left · {formatLength(b.lengthIn - at)} from right</small></span>
+              <span className="p">
+                {' '}{formatLength(at)} <small>to center · box {formatLength(lay.lefts[i])} to {formatLength(lay.rights[i])} from the left end</small>
+              </span>
+              <span className="wm-devkind">{b.deviceTypes[i] === 'double' ? 'Double duplex' : 'Duplex'}</span>
               <i className="wm-sw" style={{ background: c.hex }} aria-hidden="true" />{colorText(c)}
             </div>
           );

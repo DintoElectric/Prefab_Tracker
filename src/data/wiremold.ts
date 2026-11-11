@@ -3,7 +3,10 @@
 //
 // A TICKET holds many BUILDS, the same way a pull sheet holds many boxes. Each
 // build is one run of raceway:
+//   • the wiremold series, and whether it is single or double (two-channel)
 //   • length of the run
+//   • the device boxes: duplex or double duplex, standing up or turned to run
+//     along the raceway — which sets how much of the run each box takes up
 //   • how many devices, and the spacing between them (feet/inches)
 //   • the color of each device
 //   • which end it is fed from, and the whip there (none = the wire is end capped)
@@ -14,8 +17,12 @@
 //
 // Spacing is ONE value used between every pair of devices; any single gap can
 // be given its own spacing, which replaces the main one for that gap only (the
-// same way one device can be given its own color). Devices are centered on the
-// run unless the foreman gives the distance from the left end to the first device.
+// same way one device can be given its own color). It is measured either
+// BETWEEN BOXES (edge to edge — so a longer box pushes the next one along) or
+// CENTER TO CENTER. Whichever way it was typed, a build is stored one way:
+// center-to-center gaps plus each box's length, so the two can never disagree.
+// Devices are centered on the run unless the foreman gives the distance from
+// the left end to the first device.
 //
 // "Left" and "right" are as you face the run.
 //
@@ -43,6 +50,62 @@ export const FEED_ENDS: { v: FeedEnd; label: string }[] = [
   { v: 'right', label: 'Right end' },
   { v: 'both', label: 'Both ends' }
 ];
+
+export type DeviceType = 'duplex' | 'double';
+export const DEVICE_TYPES: { v: DeviceType; label: string }[] = [
+  { v: 'duplex', label: 'Duplex' },
+  { v: 'double', label: 'Double duplex' }
+];
+export type Measure = 'clear' | 'center';
+export const MEASURES: { v: Measure; label: string }[] = [
+  { v: 'clear', label: 'Between boxes' },
+  { v: 'center', label: 'Center to center' }
+];
+export const CHANNELS: { v: 1 | 2; label: string }[] = [
+  { v: 1, label: 'Single' },
+  { v: 2, label: 'Double' }
+];
+
+// How much of the run one device box takes up, in inches. These are the
+// standard device-plate sizes — a single-gang plate is 2-3/4" × 4-1/2" and a
+// two-gang plate is 4-9/16" wide — so a box standing up takes its width and a
+// box turned along the raceway takes its height. A double duplex turned along
+// the raceway is two devices end to end. The foreman can type the real size on
+// any build; these are only what the form starts with.
+export const MAX_BOX_IN = 48;
+export const BOX_DEFAULT: Record<'vertical' | 'horizontal', Record<DeviceType, number>> = {
+  vertical:   { duplex: 2.75, double: 4.5625 },
+  horizontal: { duplex: 4.5,  double: 9 }
+};
+
+// Raceway series. A series can carry what is known about it; only the Hubbell
+// aluminum series does so far (from the Yale OML submittal 260533-002: a
+// two-channel base, and device cover plates that are 12" long and run along
+// the channel).
+export interface SeriesDef {
+  v: string;
+  label: string;
+  channels?: 1 | 2;
+  horizontal?: boolean;
+  box?: Record<DeviceType, number>;
+}
+export const SERIES: SeriesDef[] = [
+  { v: '500', label: '500' },
+  { v: '700', label: '700' },
+  { v: '2000', label: '2000' },
+  { v: '2100', label: '2100' },
+  { v: '2400', label: '2400' },
+  { v: '3000', label: '3000' },
+  { v: '4000', label: '4000' },
+  { v: '6000', label: '6000' },
+  { v: 'HBLALU5000', label: 'Hubbell ALU5000 (aluminum)', channels: 2, horizontal: true, box: { duplex: 12, double: 24 } },
+  { v: 'other', label: 'Other — see notes' }
+];
+export const seriesDef = (v: string): SeriesDef | undefined => SERIES.find(x => x.v === v);
+export const seriesLabel = (v: string): string => seriesDef(v)?.label || v || 'Not specified';
+export const boxDefaults = (series: string, horizontal: boolean): Record<DeviceType, number> =>
+  seriesDef(series)?.box || BOX_DEFAULT[horizontal ? 'horizontal' : 'vertical'];
+export const isDeviceType = (t: unknown): t is DeviceType => t === 'duplex' || t === 'double';
 
 export interface DeviceColor { key: string; label: string; note?: string; hex: string; ink: string; }
 // Yale 26 27 26: faces are ivory in finished areas unless another color suits
@@ -186,10 +249,16 @@ export interface WireSpec { type: string; size: WireSize; conductors: Conductor[
 export interface WiremoldBuild {
   label: string;               // 'Rm 204 north wall'
   qty: number;                 // identical copies of this build
+  series: string;              // wiremold series; '' = not given (tickets sent before this field)
+  channels: 1 | 2;             // single, or double (two-channel) raceway
   lengthIn: number;            // overall run, inches
   devices: number;
-  gapsIn: number[];            // devices - 1 gaps, inches
-  startIn: number | null;      // first device from the LEFT end; null = centered
+  horizontal: boolean;         // device boxes turned to run along the raceway
+  deviceTypes: DeviceType[];   // one per device
+  widthsIn: number[];          // one per device: how much of the run its box takes up
+  measure: Measure;            // how the spacing was typed — the drawing dimensions it the same way
+  gapsIn: number[];            // devices - 1 gaps, CENTER TO CENTER, inches
+  startIn: number | null;      // center of the first device from the LEFT end; null = centered
   deviceColors: string[];      // one per device
   feed: FeedEnd;
   whipIn: number | null;       // whip at each fed end, inches; null = no whip, the wire is end capped
@@ -219,19 +288,71 @@ export function wireLengthText(b: Pick<WiremoldBuild, 'lengthIn' | 'devices' | '
   return `${formatLength(w.totalIn)} each — ${parts.join(' + ')}`;
 }
 
-export interface Layout {
-  positions: number[];         // inches from the left end, one per device
-  startIn: number;             // left end -> first device
-  endIn: number;               // last device -> right end
-  spanIn: number;              // first device -> last device
+// A ticket stored before a field existed simply doesn't have it. This fills in
+// what those tickets meant, so everything downstream can rely on a full build.
+export function fillBuild(raw: any): WiremoldBuild {
+  const devices: number = raw.devices;
+  const series = typeof raw.series === 'string' ? raw.series : '';
+  const horizontal = raw.horizontal === true;
+  const defs = boxDefaults(series, horizontal);
+  const deviceTypes: DeviceType[] = Array.from({ length: devices }, (_, i) => (raw.deviceTypes?.[i] === 'double' ? 'double' : 'duplex'));
+  const widthsIn: number[] = Array.from({ length: devices }, (_, i) => {
+    const w = raw.widthsIn?.[i];
+    return typeof w === 'number' && w > 0 ? w : defs[deviceTypes[i]];
+  });
+  return {
+    ...raw,
+    series, horizontal, deviceTypes, widthsIn,
+    channels: raw.channels === 2 ? 2 : 1,
+    measure: raw.measure === 'clear' ? 'clear' : 'center',   // older tickets were typed center to center
+    whipIn: raw.whipIn ?? null
+  };
 }
 
-export function layoutBuild(b: Pick<WiremoldBuild, 'lengthIn' | 'gapsIn' | 'startIn'>): Layout {
-  const span = b.gapsIn.reduce((n, g) => n + g, 0);
-  const start = b.startIn ?? (b.lengthIn - span) / 2;
+export interface Layout {
+  positions: number[];         // center of each device, inches from the left end
+  lefts: number[];             // near edge of each box
+  rights: number[];            // far edge of each box
+  clear: number[];             // open raceway between one box and the next (devices - 1)
+  startIn: number;             // left end -> center of the first device
+  endIn: number;               // center of the last device -> right end
+  leadIn: number;              // left end -> near edge of the first box
+  tailIn: number;              // far edge of the last box -> right end
+  spanIn: number;              // center of the first device -> center of the last
+}
+
+// Where everything sits. With no first-device distance the boxes are centered:
+// the same open raceway before the first box as after the last.
+export function layoutBuild(b: Pick<WiremoldBuild, 'lengthIn' | 'gapsIn' | 'startIn'> & { widthsIn?: number[] }): Layout {
+  const n = b.gapsIn.length + 1;
+  const w = Array.from({ length: n }, (_, i) => b.widthsIn?.[i] ?? BOX_DEFAULT.vertical.duplex);
+  const span = b.gapsIn.reduce((x, g) => x + g, 0);
+  const start = b.startIn ?? (b.lengthIn - span - w[n - 1] / 2 + w[0] / 2) / 2;
   const positions = [start];
   for (const g of b.gapsIn) positions.push(positions[positions.length - 1] + g);
-  return { positions, startIn: start, endIn: b.lengthIn - start - span, spanIn: span };
+  const lefts = positions.map((p, i) => p - w[i] / 2);
+  const rights = positions.map((p, i) => p + w[i] / 2);
+  return {
+    positions, lefts, rights,
+    clear: b.gapsIn.map((_, i) => lefts[i + 1] - rights[i]),
+    startIn: start,
+    endIn: b.lengthIn - positions[n - 1],
+    leadIn: lefts[0],
+    tailIn: b.lengthIn - rights[n - 1],
+    spanIn: span
+  };
+}
+
+// What is physically wrong with a layout, or null. Boxes can't overlap and
+// can't hang off either end of the run.
+const EPS = 1e-6;
+export function layoutProblem(lay: Layout, centered: boolean): string | null {
+  const hit = lay.clear.findIndex(c => c < -EPS);
+  if (hit >= 0) return `devices ${hit + 1} and ${hit + 2} overlap by ${formatLength(-lay.clear[hit])} — their boxes are longer than that spacing`;
+  if (centered) return lay.leadIn < -EPS ? `devices run ${formatLength(-(lay.leadIn + lay.tailIn))} past the end of the run` : null;
+  if (lay.leadIn < -EPS) return `the first box hangs ${formatLength(-lay.leadIn)} past the left end`;
+  if (lay.tailIn < -EPS) return `devices run ${formatLength(-lay.tailIn)} past the end of the run`;
+  return null;
 }
 
 // Authoritative check of a finished build (the server runs this too, so the
@@ -242,6 +363,9 @@ export function checkBuild(raw: any): BuildCheck {
   const bad = (error: string): BuildCheck => ({ ok: false, error });
   const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : NaN);
   const r16 = (n: number) => Math.round(n / SIXTEENTH) * SIXTEENTH;
+  // Centers sit half a box from an edge, and a box can be an odd number of
+  // sixteenths long — so center-to-center values keep 1/32" to land box edges exactly.
+  const r32 = (n: number) => Math.round(n * 32) / 32;
 
   const label = String(raw?.label ?? '').trim().slice(0, 60);
   const qty = num(raw?.qty);
@@ -252,18 +376,40 @@ export function checkBuild(raw: any): BuildCheck {
   const devices = num(raw?.devices);
   if (!Number.isInteger(devices) || devices < 1 || devices > MAX_DEVICES) return bad(`devices must be 1–${MAX_DEVICES}`);
 
+  // Raceway and device boxes. Every one of these may be missing on a ticket
+  // sent by an older copy of the form; each has the meaning it had then.
+  const series = String(raw?.series ?? '').trim().slice(0, 40);
+  if (raw?.channels !== undefined && raw.channels !== 1 && raw.channels !== 2) return bad('raceway must be single or double');
+  const channels: 1 | 2 = raw?.channels === 2 ? 2 : 1;
+  if (raw?.horizontal !== undefined && typeof raw.horizontal !== 'boolean') return bad('box direction must be yes or no');
+  const horizontal = raw?.horizontal === true;
+  if (raw?.measure !== undefined && raw.measure !== 'clear' && raw.measure !== 'center') return bad('unknown spacing measure');
+  const measure: Measure = raw?.measure === 'clear' ? 'clear' : 'center';
+  let deviceTypes: DeviceType[] = Array(devices).fill('duplex');
+  if (raw?.deviceTypes !== undefined) {
+    if (!Array.isArray(raw.deviceTypes) || raw.deviceTypes.length !== devices || !raw.deviceTypes.every(isDeviceType)) return bad('every device must be duplex or double duplex');
+    deviceTypes = raw.deviceTypes;
+  }
+  const defs = boxDefaults(series, horizontal);
+  let widthsIn: number[] = deviceTypes.map(t => defs[t]);
+  if (raw?.widthsIn !== undefined) {
+    if (!Array.isArray(raw.widthsIn) || raw.widthsIn.length !== devices) return bad('every device needs a box length');
+    widthsIn = raw.widthsIn.map((x: unknown) => r16(num(x)));
+    if (widthsIn.some(x => !(x > 0) || x > MAX_BOX_IN)) return bad(`box length must be more than zero and no more than ${formatLength(MAX_BOX_IN)}`);
+  }
+
   const gapsRaw: unknown[] = Array.isArray(raw?.gapsIn) ? raw.gapsIn : [];
   if (gapsRaw.length !== devices - 1) return bad(`${devices} devices need ${devices - 1} spacing${devices - 1 === 1 ? '' : 's'}`);
-  const gapsIn = gapsRaw.map(g => r16(num(g)));
+  const gapsIn = gapsRaw.map(g => r32(num(g)));
   if (gapsIn.some(g => !(g > 0))) return bad('every spacing must be longer than zero');
 
   let startIn: number | null = null;
   if (raw?.startIn !== null && raw?.startIn !== undefined) {
-    startIn = r16(num(raw.startIn));
+    startIn = r32(num(raw.startIn));
     if (!(startIn >= 0)) return bad('first-device distance must be zero or more');
   }
-  const over = (startIn ?? 0) + gapsIn.reduce((n, g) => n + g, 0) - lengthIn;
-  if (over > 1e-9) return bad(`devices run ${formatLength(over)} past the end of the run`);
+  const wrong = layoutProblem(layoutBuild({ lengthIn, gapsIn, startIn, widthsIn }), startIn === null);
+  if (wrong) return bad(wrong);
 
   const colorsRaw: unknown[] = Array.isArray(raw?.deviceColors) ? raw.deviceColors : [];
   if (colorsRaw.length !== devices || !colorsRaw.every(isDeviceColor)) return bad('every device needs a color');
@@ -293,7 +439,8 @@ export function checkBuild(raw: any): BuildCheck {
   return {
     ok: true,
     build: {
-      label, qty, lengthIn, devices, gapsIn, startIn, deviceColors: colorsRaw as string[],
+      label, qty, series, channels, lengthIn, devices, horizontal, deviceTypes, widthsIn, measure,
+      gapsIn, startIn, deviceColors: colorsRaw as string[],
       feed: raw.feed, whipIn, wire: { type, size: w.size, conductors }
     }
   };
@@ -303,8 +450,16 @@ export function checkBuild(raw: any): BuildCheck {
 export interface BuildDraft {
   label: string;
   qty: string;
+  series: string;          // '' until one is chosen
+  channels: 1 | 2;         // single or double raceway
   length: string;          // "12'" — a bare number means feet
   devices: string;
+  deviceType: DeviceType;  // type of every device…
+  types: string[];         // …unless this has an entry for that device
+  horizontal: boolean;     // boxes turned to run along the raceway
+  boxDuplex: string;       // how much of the run a duplex box takes; blank = the standard size
+  boxDouble: string;       // same, for a double duplex
+  measure: Measure;        // spacing typed between boxes, or center to center
   spacing: string;         // "2'-6"" for every gap — a bare number means inches
   gaps: string[];          // a gap's own spacing; '' = use the main spacing for that gap
   eachGap: boolean;        // the "spacing of each gap" panel is open
@@ -313,24 +468,28 @@ export interface BuildDraft {
   whip: string;            // whip length at the fed end(s); blank = end capped; a bare number means feet
   deviceColor: string;     // color for every device…
   colors: string[];        // …unless this has an entry for that device
-  each: boolean;           // the "color each device" panel is open
+  each: boolean;           // the "each device" panel is open
   wireType: string;
   wireSize: WireSize;
   conductors: Conductor[];
 }
 
 export const emptyBuildDraft = (): BuildDraft => ({
-  label: '', qty: '1', length: '', devices: '', spacing: '', gaps: [], eachGap: false, start: '', feed: 'left', whip: '',
+  label: '', qty: '1', series: '', channels: 1, length: '', devices: '',
+  deviceType: 'duplex', types: [], horizontal: false, boxDuplex: '', boxDouble: '',
+  measure: 'clear', spacing: '', gaps: [], eachGap: false, start: '', feed: 'left', whip: '',
   deviceColor: DEFAULT_DEVICE_COLOR, colors: [], each: false,
   wireType: DEFAULT_WIRE_TYPE, wireSize: DEFAULT_WIRE_SIZE,
   conductors: WIRE_PRESETS[0].conductors.map(c => ({ ...c }))
 });
 
-export type DraftField = 'qty' | 'length' | 'devices' | 'spacing' | 'gaps' | 'start' | 'whip' | 'wire' | 'fit';
+export type DraftField = 'qty' | 'length' | 'devices' | 'box' | 'spacing' | 'gaps' | 'start' | 'whip' | 'wire' | 'fit';
 export interface DraftResult {
   build: WiremoldBuild | null;                 // set only when nothing is wrong
   errors: Partial<Record<DraftField, string>>;
-  echo: { length?: string; spacing?: string; start?: string; end?: string; whip?: string };   // how it was understood
+  // how each field was understood
+  echo: { length?: string; spacing?: string; alt?: string; start?: string; end?: string; whip?: string };
+  box: Record<DeviceType, string>;             // the box length in force for each type, e.g. 2 3/4"
   gapEcho: string[];                           // the spacing in force for each gap ('' where none is known yet)
   badGaps: number[];                           // gaps whose own spacing can't be read
   complete: boolean;                           // false while the essentials are still blank
@@ -343,6 +502,12 @@ export function resolveDraft(d: BuildDraft): DraftResult {
   const errors: DraftResult['errors'] = {};
   const echo: DraftResult['echo'] = {};
   let complete = true;
+
+  // A draft saved before a choice existed doesn't have it; it means what it meant then.
+  const measure: Measure = d.measure === 'clear' ? 'clear' : 'center';
+  const series = typeof d.series === 'string' ? d.series : '';
+  const horizontal = d.horizontal === true;
+  const channels: 1 | 2 = d.channels === 2 ? 2 : 1;
 
   // quantity
   let qty = NaN;
@@ -365,68 +530,104 @@ export function resolveDraft(d: BuildDraft): DraftResult {
   else if (!/^\d+$/.test(d.devices.trim()) || +d.devices < 1 || +d.devices > MAX_DEVICES) errors.devices = `1–${MAX_DEVICES}`;
   else devices = parseInt(d.devices, 10);
 
-  // spacing: the main value covers every gap; a gap with its own value replaces it there
-  let gaps: number[] | null = null;
+  // box sizes: the standard size for this series and direction, unless one is typed
+  const size: Record<DeviceType, number> = { ...boxDefaults(series, horizontal) };
+  for (const t of ['duplex', 'double'] as DeviceType[]) {
+    const txt = ((t === 'duplex' ? d.boxDuplex : d.boxDouble) || '').trim();
+    if (!txt) continue;
+    const v = parseLength(txt, 'in');
+    if (v === null || !(v > 0) || v > MAX_BOX_IN) errors.box = errors.box || `"${txt}" isn't a box length — try 2 3/4" or 12"`;
+    else size[t] = v;
+  }
+  const box: Record<DeviceType, string> = { duplex: formatLength(size.duplex), double: formatLength(size.double) };
+
+  // each device's type, and so how much of the run its box takes
+  let deviceTypes: DeviceType[] = [];
+  let widthsIn: number[] = [];
+  if (Number.isFinite(devices)) {
+    const all: DeviceType = d.deviceType === 'double' ? 'double' : 'duplex';
+    const own = d.types || [];
+    deviceTypes = Array.from({ length: devices }, (_, i) => (isDeviceType(own[i]) ? own[i] as DeviceType : all));
+    widthsIn = deviceTypes.map(t => size[t]);
+  }
+
+  // spacing: the main value covers every gap; a gap with its own value replaces it there.
+  // Between boxes, a gap may be zero (boxes touching); center to center it can't be.
+  let gaps: number[] | null = null;              // always center to center
   const gapEcho: string[] = [];
   const badGaps: number[] = [];
+  const tooSmall = (g: number) => (measure === 'clear' ? g < 0 : !(g > 0));
   if (Number.isFinite(devices)) {
     const n = devices - 1;
     let base: (number | null)[] = Array(n).fill(null);
     if (n > 0 && d.spacing.trim()) {
       const p = parseSpacings(d.spacing);
       if (p.bad.length) errors.spacing = `"${p.bad[0]}" isn't a length — try 2'-6" or 30"`;
-      else if (p.gaps.some(g => !(g > 0))) errors.spacing = 'Spacing must be more than zero';
+      else if (p.gaps.some(tooSmall)) errors.spacing = 'Spacing must be more than zero';
       else if (p.gaps.length === 1) base = Array(n).fill(p.gaps[0]);
       else if (p.gaps.length === n) base = p.gaps;
       else errors.spacing = `${devices} devices have ${n} gaps — type one spacing for all, or ${n} separated by commas`;
     }
-    const final = base.slice();
-    const typed = d.gaps || [];
+    const typed = base.slice();                  // as measured on the form
+    const each = d.gaps || [];
     let own = 0;
     for (let i = 0; i < n; i++) {
-      const t = (typed[i] || '').trim();
+      const t = (each[i] || '').trim();
       if (!t) continue;
       const v = parseLength(t, 'in');
-      if (v === null || !(v > 0)) { badGaps.push(i); continue; }
-      final[i] = v;
+      if (v === null || tooSmall(v)) { badGaps.push(i); continue; }
+      typed[i] = v;
       own++;
     }
     if (badGaps.length) {
       const i = badGaps[0];
-      errors.gaps = `Gap ${i + 1} → ${i + 2}: "${(typed[i] || '').trim()}" isn't a length — try 2'-6" or 30"`;
+      errors.gaps = `Gap ${i + 1} → ${i + 2}: "${(each[i] || '').trim()}" isn't a length — try 2'-6" or 30"`;
     }
-    for (let i = 0; i < n; i++) gapEcho.push(final[i] === null ? '' : formatLength(final[i] as number));
+    for (let i = 0; i < n; i++) gapEcho.push(typed[i] === null ? '' : formatLength(typed[i] as number));
     if (!errors.spacing && !errors.gaps) {
-      if (final.every(g => g !== null)) {
-        gaps = final as number[];
+      if (typed.every(g => g !== null)) {
+        const t = typed as number[];
+        const half = (i: number) => (widthsIn[i] + widthsIn[i + 1]) / 2;   // from one box's center to its edge, and the next's
+        gaps = measure === 'clear' ? t.map((g, i) => g + half(i)) : t;
         if (n > 0) {
-          const same = gaps.every(g => g === gaps![0]);
-          echo.spacing = same
-            ? `${formatLength(gaps[0])} between each`
-            : `${formatLength(gaps.reduce((x, y) => x + y, 0))} from first to last`;
+          const same = (xs: number[]) => xs.every(x => Math.abs(x - xs[0]) < 1e-9);
+          const sum = (xs: number[]) => xs.reduce((x, y) => x + y, 0);
+          echo.spacing = measure === 'clear'
+            ? (same(t) ? `${formatLength(t[0])} between each box` : `${formatLength(sum(t))} of open raceway between boxes`)
+            : (same(t) ? `${formatLength(t[0])} center to center` : `${formatLength(sum(t))} from first to last`);
           if (own) echo.spacing += ` · ${own} gap${own === 1 ? '' : 's'} set individually`;
+          // the same spacing, measured the other way
+          const other = measure === 'clear' ? gaps : gaps.map((g, i) => g - half(i));
+          if (same(other) && other[0] >= 0) {
+            echo.alt = measure === 'clear'
+              ? `${formatLength(other[0])} center to center`
+              : `${formatLength(other[0])} between boxes`;
+          }
         }
       } else complete = false;   // at least one gap has no spacing yet
     }
   }
 
-  // first-device distance
-  let startIn: number | null = null;
+  // first device: between boxes it is the open raceway before the first box;
+  // center to center it is the distance to the device's center
+  let startIn: number | null = null;             // always to the center
   if (d.start.trim()) {
     const v = parseLength(d.start, 'in');
     if (v === null || v < 0) errors.start = `Type the distance like 1'-6" or 18"`;
-    else { startIn = v; echo.start = formatLength(v); }
+    else if (widthsIn.length) startIn = measure === 'clear' ? v + widthsIn[0] / 2 : v;
   }
 
   // does it fit?
-  if (Number.isFinite(lengthIn) && gaps && !errors.start) {
-    const lay = layoutBuild({ lengthIn, gapsIn: gaps, startIn });
-    const over = (startIn ?? 0) + lay.spanIn - lengthIn;
-    if (over > 1e-9) {
-      errors.fit = `The devices run ${formatLength(over)} past the end of the run — shorten the spacing or the offset, or lengthen the run`;
+  if (Number.isFinite(lengthIn) && gaps && !errors.start && !errors.box) {
+    const lay = layoutBuild({ lengthIn, gapsIn: gaps, startIn, widthsIn });
+    const wrong = layoutProblem(lay, startIn === null);
+    if (wrong) {
+      errors.fit = wrong.includes('overlap')
+        ? wrong[0].toUpperCase() + wrong.slice(1)
+        : `${wrong.startsWith('devices') ? 'The ' + wrong : wrong[0].toUpperCase() + wrong.slice(1)} — shorten the spacing or the offset, or lengthen the run`;
     } else {
-      if (startIn === null) echo.start = `${formatLength(lay.startIn)} (centered)`;
-      echo.end = formatLength(lay.endIn);
+      echo.start = formatLength(measure === 'clear' ? lay.leadIn : lay.startIn) + (startIn === null ? ' (centered)' : '');
+      echo.end = formatLength(measure === 'clear' ? lay.tailIn : lay.endIn);
     }
   }
 
@@ -453,12 +654,13 @@ export function resolveDraft(d: BuildDraft): DraftResult {
     const colors = Array.from({ length: devices }, (_, i) =>
       isDeviceColor(d.colors[i]) ? d.colors[i] : isDeviceColor(d.deviceColor) ? d.deviceColor : DEFAULT_DEVICE_COLOR);
     const chk = checkBuild({
-      label: d.label, qty, lengthIn, devices, gapsIn: gaps, startIn, deviceColors: colors, feed: d.feed, whipIn,
+      label: d.label, qty, series, channels, lengthIn, devices, horizontal, deviceTypes, widthsIn, measure,
+      gapsIn: gaps, startIn, deviceColors: colors, feed: d.feed, whipIn,
       wire: { type: d.wireType, size: d.wireSize, conductors: d.conductors }
     });
     if (chk.ok) build = chk.build; else errors.wire = chk.error;
   }
-  return { build, errors, echo, gapEcho, badGaps, complete };
+  return { build, errors, echo, box, gapEcho, badGaps, complete };
 }
 
 // ── the to-scale drawing ──
@@ -467,7 +669,16 @@ export function resolveDraft(d: BuildDraft): DraftResult {
 export const ROW_TARGET_IN = 240;
 
 export interface GeoRow { index: number; from: number; to: number; }
-export interface GeoDevice { index: number; at: number; row: number; color: DeviceColor; }
+export interface GeoDevice {
+  index: number;
+  at: number;                // center
+  left: number;              // near edge of the box
+  right: number;             // far edge of the box
+  widthIn: number;
+  row: number;
+  color: DeviceColor;
+  type: DeviceType;
+}
 export interface GeoSegment {
   kind: 'lead' | 'gap' | 'tail';
   dim: number;               // pieces of one dimension share this number
@@ -482,9 +693,13 @@ export interface Geometry {
   devices: GeoDevice[];
   segments: GeoSegment[];
   layout: Layout;
+  measure: Measure;          // dimensions run box edge to box edge, or center to center
+  channels: 1 | 2;
+  horizontal: boolean;
 }
 
-export function wiremoldGeometry(b: WiremoldBuild): Geometry {
+export function wiremoldGeometry(raw: WiremoldBuild): Geometry {
+  const b = fillBuild(raw);
   const nRows = Math.max(1, Math.ceil(b.lengthIn / ROW_TARGET_IN - 1e-9));
   const rowIn = b.lengthIn / nRows;
   const rows: GeoRow[] = Array.from({ length: nRows }, (_, i) => ({ index: i, from: i * rowIn, to: (i + 1) * rowIn }));
@@ -492,7 +707,8 @@ export function wiremoldGeometry(b: WiremoldBuild): Geometry {
 
   const layout = layoutBuild(b);
   const devices: GeoDevice[] = layout.positions.map((at, i) => ({
-    index: i, at, row: rowOf(at), color: deviceColor(b.deviceColors[i])
+    index: i, at, left: layout.lefts[i], right: layout.rights[i], widthIn: b.widthsIn[i],
+    row: rowOf(at), color: deviceColor(b.deviceColors[i]), type: b.deviceTypes[i]
   }));
 
   // A dimension runs from `a` to `z`; draw a piece of it on every row it crosses.
@@ -508,11 +724,16 @@ export function wiremoldGeometry(b: WiremoldBuild): Geometry {
       segs.push({ kind, dim, from, to, row: r.index, label, startsHere: from === a, endsHere: to === z });
     }
   };
-  addDim('lead', 0, layout.positions[0]);
-  for (let i = 0; i < b.gapsIn.length; i++) addDim('gap', layout.positions[i], layout.positions[i + 1]);
-  addDim('tail', layout.positions[layout.positions.length - 1], b.lengthIn);
+  // Dimension it the way it was typed: the open raceway between boxes, or center to center.
+  const edge = b.measure === 'clear';
+  const last = devices.length - 1;
+  addDim('lead', 0, edge ? layout.lefts[0] : layout.positions[0]);
+  for (let i = 0; i < last; i++) {
+    addDim('gap', edge ? layout.rights[i] : layout.positions[i], edge ? layout.lefts[i + 1] : layout.positions[i + 1]);
+  }
+  addDim('tail', edge ? layout.rights[last] : layout.positions[last], b.lengthIn);
 
-  return { lengthIn: b.lengthIn, rows, devices, segments: segs, layout };
+  return { lengthIn: b.lengthIn, rows, devices, segments: segs, layout, measure: b.measure, channels: b.channels, horizontal: b.horizontal };
 }
 
 // ── wire to cut ──
