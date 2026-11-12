@@ -109,3 +109,6 @@
 .wp-files .k { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--color-neutral-600); margin-right: 4px; }
 .wp-sched-wrap { padding: 14px 18px; border-bottom: 1px solid var(--color-neutral-300); background: var(--color-neutral-100); }
 .wp-sched-img { display: block; max-width: 100%; height: auto; border: 1px solid var(--color-neutral-300); background: #fff; }
+
+/* a circuit that is also in another box: allowed, so this is information, not an error */
+.wp-box-tbl .wp-repeat { color: var(--color-neutral-600); font-size: 12px; margin-top: 6px; }

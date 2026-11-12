@@ -136,10 +136,10 @@ const isBlankInput = (r: BoxInput) =>
   !r.box.trim() && !r.circuits.length && !r.bad.length && !r.footages.length && !r.footageBad.length;
 
 // One message (or null) per row. Null = fine. Blank rows are always fine —
-// they're just empty lines on the sheet. A circuit can only go to one box, so
-// a repeat is almost always a typo and the LATER row is the one flagged.
+// they're just empty lines on the sheet. The same circuit can be pulled to
+// more than one box on a sheet, so a repeat on another row is allowed (see
+// repeatNotes). Inside one row a repeat is still a typo.
 export function checkBoxRows(rows: BoxInput[]): (string | null)[] {
-  const owner = new Map<number, string>(); // circuit -> box it first appeared in
   return rows.map(r => {
     if (isBlankInput(r)) return null;
     if (r.bad.length) return `"${r.bad[0]}" isn't a circuit number — list each circuit separately`;
@@ -151,9 +151,6 @@ export function checkBoxRows(rows: BoxInput[]): (string | null)[] {
       if (seen.has(c)) return `circuit ${c} is listed twice`;
       seen.add(c);
     }
-    for (const c of r.circuits) {
-      if (owner.has(c)) return `circuit ${c} is already in box ${owner.get(c)}`;
-    }
     if (r.footageBad.length) return `"${r.footageBad[0]}" isn't a footage — use whole feet, like 205`;
     if (r.footages.some(f => !Number.isInteger(f) || f < 1 || f > MAX_FOOTAGE)) {
       return `footage must be 1–${MAX_FOOTAGE}`;
@@ -161,8 +158,31 @@ export function checkBoxRows(rows: BoxInput[]): (string | null)[] {
     if (r.footages.length > 1 && r.footages.length !== r.circuits.length) {
       return `${r.circuits.length} circuits but ${r.footages.length} footages — type one footage for all, or one per circuit`;
     }
-    for (const c of r.circuits) owner.set(c, r.box.trim());
     return null;
+  });
+}
+
+// A circuit pulled to more than one box is normal — and it is also exactly
+// what a slip looks like (12 written for 13). So the sheet says, without
+// blocking anything, where else each repeated circuit appears. One note (or
+// null) per row. Never an error.
+export function repeatNotes(rows: BoxInput[]): (string | null)[] {
+  const where = new Map<number, number[]>();          // circuit -> the rows it is on
+  rows.forEach((r, i) => {
+    if (isBlankInput(r)) return;
+    for (const c of new Set(r.circuits)) where.set(c, [...(where.get(c) || []), i]);
+  });
+  const label = (j: number) => (rows[j].box.trim() ? `box ${rows[j].box.trim()}` : `row ${j + 1}`);
+  return rows.map((r, i) => {
+    if (isBlankInput(r)) return null;
+    const parts: string[] = [];
+    for (const c of new Set(r.circuits)) {
+      const others = Array.from(new Set((where.get(c) || []).filter(j => j !== i).map(label)));
+      if (others.length) parts.push(`circuit ${c} is also in ${others.join(', ')}`);
+    }
+    if (!parts.length) return null;
+    const text = parts.join(' · ');
+    return text[0].toUpperCase() + text.slice(1);
   });
 }
 

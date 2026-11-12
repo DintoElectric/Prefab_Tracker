@@ -4,7 +4,7 @@ import { StatusTag, PrioTag } from '../lib/ui';
 import { api } from '../lib/api';
 import {
   SYSTEMS, DEFAULT_SYSTEM, MAX_CIRCUIT, MAX_FILES, MAX_FILE_BYTES, FILE_ACCEPT, WP_STATUSES, WIRE_COLORS,
-  systemDef, phaseColor, parseCircuits, parseFootages, wiresFor, checkBoxRows, buildReport, fmtFeet,
+  systemDef, phaseColor, parseCircuits, parseFootages, wiresFor, checkBoxRows, repeatNotes, buildReport, fmtFeet,
   type VoltageSystem, type BoxRow, type BoxInput, type WirePullSheet, type SheetReport, type WireColor, type FileMeta
 } from '../data/wirepulls';
 import '../styles/wirepulls.css';
@@ -274,7 +274,7 @@ function SheetForm({ user, flash, onSubmitted }: {
   const removeRow = (i: number) =>
     patch({ rows: withTrailingBlank(draft.rows.filter((_, j) => j !== i)) });
 
-  const { parsed, problems, valid, report } = useMemo(() => {
+  const { parsed, problems, repeats, valid, report } = useMemo(() => {
     const parsed: BoxInput[] = draft.rows.map(r => {
       const c = parseCircuits(r.circuits);
       const f = parseFootages(r.footage);
@@ -286,7 +286,7 @@ function SheetForm({ user, flash, onSubmitted }: {
       if (isBlank(r) || problems[i] !== null) return;
       valid.push({ box: r.box.trim(), wires: wiresFor(parsed[i].circuits, parsed[i].footages, r.neutrals) });
     });
-    return { parsed, problems, valid, report: buildReport(valid, draft.system) };
+    return { parsed, problems, repeats: repeatNotes(parsed), valid, report: buildReport(valid, draft.system) };
   }, [draft]);
 
   const filled = draft.rows.filter(r => !isBlank(r)).length;
@@ -439,6 +439,8 @@ function SheetForm({ user, flash, onSubmitted }: {
                       onChange={v => setRow(i, { circuits: v, neutrals: r.neutrals.filter(n => parseCircuits(v).circuits.includes(n)) })}
                       onToggleNeutral={c => setRow(i, { neutrals: r.neutrals.includes(c) ? r.neutrals.filter(n => n !== c) : [...r.neutrals, c] })} />
                     {why && <div className="why">{why}</div>}
+                    {/* the same circuit in another box is allowed — this only says where, in case it is a slip */}
+                    {!why && repeats[i] && <div className="wp-repeat">{repeats[i]}</div>}
                   </td>
                   <td className="fx">
                     <div className="wp-ft">
