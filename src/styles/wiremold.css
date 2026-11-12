@@ -130,3 +130,24 @@
 
 /* a double: the per-device row also carries a channel dropdown */
 .wm-each.wide.wider { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+
+/* a double: every device on a Top line or a Bottom line — tap one to move it */
+.wm-strip { margin-top: 12px; border: 1px solid var(--color-neutral-300); background: #ebe7df; overflow-x: auto; }
+.wm-strip-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; }
+.wm-strip-row + .wm-strip-row { border-top: 2px solid var(--color-neutral-600); }
+.wm-strip-k { flex: none; width: 54px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; color: var(--color-neutral-700); }
+.wm-strip-cells { display: flex; gap: 4px; flex: 1; }
+.wm-strip-dev, .wm-strip-gap { flex: 1 0 34px; min-width: 34px; max-width: 56px; height: 40px; box-sizing: border-box; }
+.wm-strip-dev { display: inline-flex; align-items: center; justify-content: center; gap: 3px; border: 1.5px solid #201e1d; border-radius: 3px; font-family: var(--font-heading); font-weight: 800; font-size: 14px; cursor: pointer; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.wm-strip-dev:hover, .wm-strip-dev:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 1px; }
+.wm-strip-data { font-size: 9px; opacity: .8; }
+
+/* a legend entry that is a sentence, not a label: let it wrap inside the panel */
+.wm-legend-row { min-width: 0; }
+.wm-long { flex: 1 1 220px; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.45; }
+
+/* the fields column is exactly as wide as its grid track: nothing inside it —
+   a long strip of devices, a wide dropdown — may push it wider */
+.wm-fields { grid-template-columns: minmax(0, 1fr); }
+.wm-fields > * { min-width: 0; }
+.wm-strip { max-width: 100%; }

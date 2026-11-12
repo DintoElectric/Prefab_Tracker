@@ -6,7 +6,7 @@ import { WiremoldFigure } from './WiremoldDiagram';
 import {
   FEED_ENDS, DEVICE_COLORS, WIRE_COLORS, WIRE_TYPES, WIRE_SIZES, ROLES, WIRE_PRESETS, WM_STATUSES,
   SERIES, CHANNELS, DEVICE_TYPES, MEASURES, PLACES, MAX_DEVICES, MAX_CONDUCTORS, MAX_BUILDS,
-  seriesDef, seriesLabel, fillBuild, isDeviceType, isPlace, conductorLength,
+  seriesDef, seriesLabel, fillBuild, isDeviceType, isPlace, conductorLength, deviceTypeLabel,
   deviceColor, wireColor, resolveDraft, emptyBuildDraft, ticketTotals, layoutBuild, formatLength,
   fmtFeetDecimal, sizeLabel, isDeviceColor, isRole, isWireColor, wireLengthText,
   type BuildDraft, type DraftResult, type WiremoldBuild, type WiremoldTicket, type TicketTotals, type WireRole,
@@ -83,7 +83,7 @@ function cleanBuildDraft(raw: any): BuildDraft {
   d.series = typeof raw.series === 'string' ? raw.series : '';
   d.channels = raw.channels === 2 ? 2 : 1;
   d.horizontal = raw.horizontal === true;
-  d.deviceType = raw.deviceType === 'double' ? 'double' : 'duplex';
+  d.deviceType = isDeviceType(raw.deviceType) ? raw.deviceType : 'duplex';
   d.types = Array.isArray(raw.types) ? raw.types.map((t: unknown) => (isDeviceType(t) ? t : '')) : [];
   d.place = raw.place === 'bottom' ? 'bottom' : 'top';
   d.places = Array.isArray(raw.places) ? raw.places.map((x: unknown) => (isPlace(x) ? x : '')) : [];
@@ -129,7 +129,15 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
   const gapCount = Math.max(0, deviceCount - 1);
   const ownGaps = (d.gaps || []).slice(0, gapCount).filter(g => (g || '').trim()).length;
   const between = d.measure === 'clear';
-  const typeOf = (k: number): DeviceType => (isDeviceType((d.types || [])[k]) ? (d.types[k] as DeviceType) : d.deviceType);
+  const allType: DeviceType = isDeviceType(d.deviceType) ? d.deviceType : 'duplex';
+  const typeOf = (k: number): DeviceType => (isDeviceType((d.types || [])[k]) ? (d.types[k] as DeviceType) : allType);
+  const colorOf = (k: number) => deviceColor(isDeviceColor(d.colors[k]) ? d.colors[k] : d.deviceColor);
+  const setPlace = (k: number, to: Place) => {
+    const places = (d.places || []).slice();
+    while (places.length < deviceCount) places.push('');
+    places[k] = to;
+    onPatch({ places });
+  };
   const isDouble = d.channels === 2;
   const allPlace: Place = d.place === 'bottom' ? 'bottom' : 'top';
   const placeOf = (k: number): Place => (isPlace((d.places || [])[k]) ? (d.places[k] as Place) : allPlace);
@@ -196,10 +204,41 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
                     onClick={() => onPatch({ place: x.v, places: [] })}>{x.label}</button>
                 ))}
               </div>
-              <div className="wm-help">
-                Moves every device. To put some in the top and some in the bottom, use “Set the color, type and channel
-                of each device” below. Wire is run in each channel that has a device.
-              </div>
+              <div className="wm-help">These two buttons move every device. To move just one, tap it below.</div>
+              {deviceCount > 0 ? (
+                <>
+                  <div className="wm-strip" role="group" aria-label={`${p} channel of each device`}>
+                    {PLACES.map(row => {
+                      const other: Place = row.v === 'top' ? 'bottom' : 'top';
+                      return (
+                        <div className="wm-strip-row" key={row.v} data-place={row.v}>
+                          <span className="wm-strip-k">{row.v === 'top' ? 'Top' : 'Bottom'}</span>
+                          <div className="wm-strip-cells">
+                            {Array.from({ length: deviceCount }, (_, k) => {
+                              if (placeOf(k) !== row.v) return <span key={k} className="wm-strip-gap" aria-hidden="true" />;
+                              const c = colorOf(k);
+                              return (
+                                <button key={k} type="button" className="wm-strip-dev" style={{ background: c.hex, color: c.ink }}
+                                  aria-label={`${p} device ${k + 1}: ${row.v} channel — move to the ${other}`}
+                                  title={`Device ${k + 1} · ${c.label} ${deviceTypeLabel(typeOf(k)).toLowerCase()} · ${row.v} channel — tap to move to the ${other}`}
+                                  onClick={() => setPlace(k, other)}>
+                                  {k + 1}{typeOf(k) === 'data' ? <span className="wm-strip-data" aria-hidden="true">▲</span> : null}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="wm-help">
+                    Each device is shown in its color (▲ marks a data jack). Tap one to move it to the other channel —
+                    for example the red emergency devices to the bottom.
+                  </div>
+                </>
+              ) : (
+                <div className="wm-help">Enter the device count and each device shows up here so you can move it on its own.</div>
+              )}
             </div>
           )}
 
@@ -235,7 +274,7 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
             </label>
             <div className="wm-pair wm-boxlen">
               <div>
-                <span className="wm-mini">Duplex box takes</span>
+                <span className="wm-mini">Duplex or data jack takes</span>
                 <input className="input" aria-label={`${p} duplex box length`} placeholder={res.box.duplex} autoComplete="off"
                   value={d.boxDuplex || ''} onChange={ev => onPatch({ boxDuplex: ev.target.value.slice(0, 20) })} />
               </div>
@@ -248,7 +287,77 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
               )}
             </div>
             {e.box && <div className="wm-why">{e.box}</div>}
-            <div className="wm-help">How much of the run one box takes up. The gray number is the standard size — type over it if yours differs.</div>
+            <div className="wm-help">
+              These buttons set every device. To make one device different — a data jack among duplexes, say — use the
+              list of devices below. Box sizes are how much of the run one box takes up; the gray number is the standard
+              size, so type over it if yours differs.
+            </div>
+          </div>
+
+          {/* 4: color of each device */}
+          <div className="wm-f">
+            <span className="wm-lbl">Device color</span>
+            <div className="wm-colorrow">
+              <i className="wm-sw" style={{ background: allColor.hex }} aria-hidden="true" />
+              <select className="input" aria-label={`${p} device color`} value={d.deviceColor}
+                onChange={ev => onPatch({ deviceColor: ev.target.value, colors: [] })}>
+                {DEVICE_COLORS.map(c => <option key={c.key} value={c.key}>{colorText(c)}</option>)}
+              </select>
+            </div>
+            <div className="wm-help">Applies to every device. Ivory is the standard face color.</div>
+          </div>
+
+          {/* each device on its own: color, type and — on a double — channel */}
+          <div className="wm-f">
+            <span className="wm-lbl">Each device{isDouble ? ' — color, type, channel' : ' — color, type'}</span>
+            {deviceCount === 0 && <div className="wm-help">Enter the device count to list the devices.</div>}
+            {deviceCount > 0 && (
+              <button type="button" className="wm-linkbtn" style={{ marginTop: 0 }} onClick={() => onPatch({ each: !d.each })}>
+                {d.each ? 'Hide the list of devices' : `Show the list of devices (${deviceCount})`}
+              </button>
+            )}
+            {d.each && deviceCount > 0 && (
+              <div className={'wm-each wide' + (isDouble ? ' wider' : '')}>
+                {Array.from({ length: deviceCount }, (_, k) => {
+                  const key = isDeviceColor(d.colors[k]) ? d.colors[k] : d.deviceColor;
+                  return (
+                    <div className="wm-each-item" key={k}>
+                      <b>{k + 1}</b>
+                      <i className="wm-sw" style={{ background: deviceColor(key).hex }} aria-hidden="true" />
+                      <select aria-label={`${p} device ${k + 1} color`} value={key}
+                        onChange={ev => {
+                          const colors = d.colors.slice();
+                          while (colors.length < deviceCount) colors.push('');
+                          colors[k] = ev.target.value;
+                          onPatch({ colors });
+                        }}>
+                        {DEVICE_COLORS.map(c => <option key={c.key} value={c.key}>{colorText(c)}</option>)}
+                      </select>
+                      <select aria-label={`${p} device ${k + 1} type`} value={typeOf(k)}
+                        onChange={ev => {
+                          const types = (d.types || []).slice();
+                          while (types.length < deviceCount) types.push('');
+                          types[k] = ev.target.value;
+                          onPatch({ types });
+                        }}>
+                        {DEVICE_TYPES.map(t => <option key={t.v} value={t.v}>{t.label}</option>)}
+                      </select>
+                      {isDouble && (
+                        <select aria-label={`${p} device ${k + 1} channel`} value={placeOf(k)}
+                          onChange={ev => {
+                            const places = (d.places || []).slice();
+                            while (places.length < deviceCount) places.push('');
+                            places[k] = ev.target.value;
+                            onPatch({ places });
+                          }}>
+                          {PLACES.map(x => <option key={x.v} value={x.v}>{x.v === 'top' ? 'Top' : 'Bottom'}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* 3: spacing — one value for every gap, and each gap can have its own */}
@@ -318,68 +427,6 @@ function BuildCard({ n, d, res, canRemove, canDuplicate, onPatch, onDuplicate, o
                 : ''}</div>}
           </div>
           {e.fit && <div className="wm-why" role="alert">{e.fit}</div>}
-
-          {/* 4: color of each device */}
-          <div className="wm-f">
-            <span className="wm-lbl">Device color</span>
-            <div className="wm-colorrow">
-              <i className="wm-sw" style={{ background: allColor.hex }} aria-hidden="true" />
-              <select className="input" aria-label={`${p} device color`} value={d.deviceColor}
-                onChange={ev => onPatch({ deviceColor: ev.target.value, colors: [] })}>
-                {DEVICE_COLORS.map(c => <option key={c.key} value={c.key}>{colorText(c)}</option>)}
-              </select>
-            </div>
-            <div className="wm-help">Applies to every device. Ivory is the standard face color.</div>
-            {deviceCount > 0 && (
-              <button type="button" className="wm-linkbtn" onClick={() => onPatch({ each: !d.each })}>
-                {d.each
-                  ? (isDouble ? 'Hide the color, type and channel of each device' : 'Hide the color and type of each device')
-                  : (isDouble ? 'Set the color, type and channel of each device' : 'Set the color and type of each device')}
-              </button>
-            )}
-            {d.each && deviceCount > 0 && (
-              <div className={'wm-each wide' + (isDouble ? ' wider' : '')}>
-                {Array.from({ length: deviceCount }, (_, k) => {
-                  const key = isDeviceColor(d.colors[k]) ? d.colors[k] : d.deviceColor;
-                  return (
-                    <div className="wm-each-item" key={k}>
-                      <b>{k + 1}</b>
-                      <i className="wm-sw" style={{ background: deviceColor(key).hex }} aria-hidden="true" />
-                      <select aria-label={`${p} device ${k + 1} color`} value={key}
-                        onChange={ev => {
-                          const colors = d.colors.slice();
-                          while (colors.length < deviceCount) colors.push('');
-                          colors[k] = ev.target.value;
-                          onPatch({ colors });
-                        }}>
-                        {DEVICE_COLORS.map(c => <option key={c.key} value={c.key}>{colorText(c)}</option>)}
-                      </select>
-                      <select aria-label={`${p} device ${k + 1} type`} value={typeOf(k)}
-                        onChange={ev => {
-                          const types = (d.types || []).slice();
-                          while (types.length < deviceCount) types.push('');
-                          types[k] = ev.target.value;
-                          onPatch({ types });
-                        }}>
-                        {DEVICE_TYPES.map(t => <option key={t.v} value={t.v}>{t.label}</option>)}
-                      </select>
-                      {isDouble && (
-                        <select aria-label={`${p} device ${k + 1} channel`} value={placeOf(k)}
-                          onChange={ev => {
-                            const places = (d.places || []).slice();
-                            while (places.length < deviceCount) places.push('');
-                            places[k] = ev.target.value;
-                            onPatch({ places });
-                          }}>
-                          {PLACES.map(x => <option key={x.v} value={x.v}>{x.v === 'top' ? 'Top' : 'Bottom'}</option>)}
-                        </select>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
 
           {/* 5: feed end */}
           <div className="wm-f">
@@ -594,8 +641,8 @@ function BuildDetail({ b: raw, n }: { b: WiremoldBuild; n: number }) {
   const same = (xs: number[]) => xs.every(x => Math.abs(x - xs[0]) < 1e-9);
   const list = (xs: number[]) => (b.devices === 1 ? '—' : same(xs) ? `${formatLength(xs[0])} each` : xs.map(formatLength).join(' · '));
   const feed = FEED_ENDS.find(f => f.v === b.feed)!.label;
-  const nDouble = b.deviceTypes.filter(t => t === 'double').length;
-  const nDuplex = b.devices - nDouble;
+  const count = (t: DeviceType) => b.deviceTypes.filter(x => x === t).length;
+  const nDouble = count('double'), nData = count('data'), nDuplex = count('duplex');
   const sizeOf = (t: DeviceType) => Array.from(new Set(b.widthsIn.filter((_, i) => b.deviceTypes[i] === t))).map(formatLength).join(' / ');
   const typed = b.measure === 'clear';
   const wire = conductorLength(b);
@@ -623,12 +670,12 @@ function BuildDetail({ b: raw, n }: { b: WiremoldBuild; n: number }) {
           )}
           <dt>Length</dt><dd>{formatLength(b.lengthIn)}</dd>
           <dt>Devices</dt>
-          <dd>{b.devices} — {[nDuplex ? `${nDuplex} duplex` : '', nDouble ? `${nDouble} double duplex` : ''].filter(Boolean).join(', ')}</dd>
+          <dd>{b.devices} — {[nDuplex ? `${nDuplex} duplex` : '', nDouble ? `${nDouble} double duplex` : '', nData ? `${nData} data jack${nData === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ')}</dd>
           <dt>Boxes</dt>
           <dd>
             {b.horizontal ? 'Horizontal (along the raceway)' : 'Standing up'}
             <div style={{ fontWeight: 400 }}>
-              {[nDuplex ? `duplex ${sizeOf('duplex')}` : '', nDouble ? `double duplex ${sizeOf('double')}` : ''].filter(Boolean).join(' · ')} of the run each
+              {[nDuplex ? `duplex ${sizeOf('duplex')}` : '', nDouble ? `double duplex ${sizeOf('double')}` : '', nData ? `data jack ${sizeOf('data')}` : ''].filter(Boolean).join(' · ')} of the run each
             </div>
           </dd>
           <dt>{typed ? 'Between boxes' : 'Center to center'}</dt>
@@ -648,9 +695,10 @@ function BuildDetail({ b: raw, n }: { b: WiremoldBuild; n: number }) {
               <div key={i}><WireSwatch colorKey={c.color} />{c.role[0].toUpperCase() + c.role.slice(1)} · {wireColor(c.color).label}</div>
             ))}
             <div style={{ color: 'var(--color-neutral-600)', fontWeight: 400 }}>
-              {wire.sets.length > 1
-                ? `Cut ${b.wire.conductors.length} for each channel — ${wireLengthText(b)}`
-                : `Cut ${b.wire.conductors.length} × ${wireLengthText(b)}`}{b.qty > 1 ? ` · ${b.qty} runs` : ''}
+              {wire.sets.length === 0 ? wireLengthText(b)
+                : wire.sets.length > 1
+                  ? `Cut ${b.wire.conductors.length} for each channel — ${wireLengthText(b)}`
+                  : `Cut ${b.wire.conductors.length} × ${wireLengthText(b)}`}{wire.sets.length && b.qty > 1 ? ` · ${b.qty} runs` : ''}
             </div>
           </dd>
         </dl>
@@ -666,7 +714,7 @@ function BuildDetail({ b: raw, n }: { b: WiremoldBuild; n: number }) {
                 {' '}{formatLength(at)} <small>to center · box {formatLength(lay.lefts[i])} to {formatLength(lay.rights[i])} from the left end</small>
               </span>
               <span className="wm-devkind">
-                {b.deviceTypes[i] === 'double' ? 'Double duplex' : 'Duplex'}{b.channels === 2 ? ` · ${b.places[i] === 'bottom' ? 'Bottom' : 'Top'}` : ''}
+                {deviceTypeLabel(b.deviceTypes[i])}{b.channels === 2 ? ` · ${b.places[i] === 'bottom' ? 'Bottom' : 'Top'}` : ''}
               </span>
               <i className="wm-sw" style={{ background: c.hex }} aria-hidden="true" />{colorText(c)}
             </div>

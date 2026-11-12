@@ -6,8 +6,9 @@
 //   • the wiremold series, and whether it is single or double (two-channel);
 //     on a double, each device box sits in the top channel or the bottom one
 //   • length of the run
-//   • the device boxes: duplex or double duplex, standing up or turned to run
-//     along the raceway — which sets how much of the run each box takes up
+//   • the device boxes: duplex, double duplex or data jack, standing up or
+//     turned to run along the raceway — which sets how much of the run each
+//     box takes up
 //   • how many devices, and the spacing between them (feet/inches)
 //   • the color of each device
 //   • which end it is fed from, and the whip there (none = the wire is end capped)
@@ -16,7 +17,9 @@
 // Wire is cut longer than the run: every device adds a foot to each conductor,
 // and a whip adds its own length at each fed end. The two channels of a double
 // are separate wiring spaces, so each channel that has devices gets its own set
-// of conductors.
+// of conductors. Data jacks are cabled by the low-voltage contractor: they take
+// up room on the run but add no wire, and a channel with only data jacks in it
+// gets none.
 //
 // Spacing is ONE value used between every pair of devices; any single gap can
 // be given its own spacing, which replaces the main one for that gap only (the
@@ -54,11 +57,15 @@ export const FEED_ENDS: { v: FeedEnd; label: string }[] = [
   { v: 'both', label: 'Both ends' }
 ];
 
-export type DeviceType = 'duplex' | 'double';
+export type DeviceType = 'duplex' | 'double' | 'data';
 export const DEVICE_TYPES: { v: DeviceType; label: string }[] = [
   { v: 'duplex', label: 'Duplex' },
-  { v: 'double', label: 'Double duplex' }
+  { v: 'double', label: 'Double duplex' },
+  { v: 'data', label: 'Data jack' }
 ];
+export const deviceTypeLabel = (t: DeviceType) => DEVICE_TYPES.find(x => x.v === t)!.label;
+// Power devices are the ones the electrician wires. A data jack is not.
+export const isPower = (t: DeviceType | undefined) => t !== 'data';
 export type Measure = 'clear' | 'center';
 export const MEASURES: { v: Measure; label: string }[] = [
   { v: 'clear', label: 'Between boxes' },
@@ -83,10 +90,11 @@ export const CHANNELS: { v: 1 | 2; label: string }[] = [
 // box turned along the raceway takes its height. A double duplex turned along
 // the raceway is two devices end to end. The foreman can type the real size on
 // any build; these are only what the form starts with.
+// A data jack sits on the same single-gang plate as a duplex, so it takes the same room.
 export const MAX_BOX_IN = 48;
 export const BOX_DEFAULT: Record<'vertical' | 'horizontal', Record<DeviceType, number>> = {
-  vertical:   { duplex: 2.75, double: 4.5625 },
-  horizontal: { duplex: 4.5,  double: 9 }
+  vertical:   { duplex: 2.75, double: 4.5625, data: 2.75 },
+  horizontal: { duplex: 4.5,  double: 9,      data: 4.5 }
 };
 
 // Raceway series. A series can carry what is known about it; only the Hubbell
@@ -109,14 +117,14 @@ export const SERIES: SeriesDef[] = [
   { v: '3000', label: '3000' },
   { v: '4000', label: '4000' },
   { v: '6000', label: '6000' },
-  { v: 'HBLALU5000', label: 'Hubbell ALU5000 (aluminum)', channels: 2, horizontal: true, box: { duplex: 12, double: 24 } },
+  { v: 'HBLALU5000', label: 'Hubbell ALU5000 (aluminum)', channels: 2, horizontal: true, box: { duplex: 12, double: 24, data: 12 } },
   { v: 'other', label: 'Other — see notes' }
 ];
 export const seriesDef = (v: string): SeriesDef | undefined => SERIES.find(x => x.v === v);
 export const seriesLabel = (v: string): string => seriesDef(v)?.label || v || 'Not specified';
 export const boxDefaults = (series: string, horizontal: boolean): Record<DeviceType, number> =>
   seriesDef(series)?.box || BOX_DEFAULT[horizontal ? 'horizontal' : 'vertical'];
-export const isDeviceType = (t: unknown): t is DeviceType => t === 'duplex' || t === 'double';
+export const isDeviceType = (t: unknown): t is DeviceType => t === 'duplex' || t === 'double' || t === 'data';
 
 export interface DeviceColor { key: string; label: string; note?: string; hex: string; ink: string; }
 // Yale 26 27 26: faces are ivory in finished areas unless another color suits
@@ -277,33 +285,40 @@ export interface WiremoldBuild {
   wire: WireSpec;
 }
 
-// Which channels have devices in them — top first. A single raceway, and any
-// ticket from before channels existed, is just the top.
+// Which channels carry wire — the ones with a POWER device in them, top first —
+// and how many power devices each has. Data jacks don't count: a channel with
+// only data jacks gets no wire, and a build with only data jacks gets none at
+// all. A single raceway, and any ticket from before channels existed, is just the top.
 export interface WiredChannel { place: Place; devices: number; }
-export function wiredChannels(b: { devices: number; channels?: number; places?: Place[] }): WiredChannel[] {
-  if (b.channels !== 2 || !Array.isArray(b.places)) return [{ place: 'top', devices: b.devices }];
-  const bottom = b.places.filter(p => p === 'bottom').length;
+type WiredInput = { devices: number; channels?: number; places?: Place[]; deviceTypes?: DeviceType[] };
+export function wiredChannels(b: WiredInput): WiredChannel[] {
+  const double = b.channels === 2 && Array.isArray(b.places);
+  let top = 0, bottom = 0;
+  for (let i = 0; i < b.devices; i++) {
+    if (!isPower(b.deviceTypes?.[i])) continue;
+    if (double && b.places![i] === 'bottom') bottom++; else top++;
+  }
   const out: WiredChannel[] = [];
-  if (b.devices - bottom) out.push({ place: 'top', devices: b.devices - bottom });
+  if (top) out.push({ place: 'top', devices: top });
   if (bottom) out.push({ place: 'bottom', devices: bottom });
   return out;
 }
 
 // How long each conductor is cut for one run of a build. Each channel that has
-// devices gets its own set of conductors: the run + a foot for every device in
-// that channel + the whip. With one channel in use that is simply
-// run + a foot per device + whip.
+// power devices gets its own set of conductors: the run + a foot for every
+// power device in that channel + the whip. With one channel in use that is
+// simply run + a foot per device + whip.
 export const feedCount = (feed: FeedEnd) => (feed === 'both' ? 2 : 1);
 export interface WireSet { place: Place; devices: number; totalIn: number; }
 export interface WireLength {
   runIn: number;       // the run itself (once for each set)
-  devicesIn: number;   // a foot for every device
+  devicesIn: number;   // a foot for every power device
   whipIn: number;      // the whip(s) — both ends fed means two, and each set has its own
   whips: number;       // how many whips (0 when end capped)
   totalIn: number;     // every set added together: what one conductor color needs for one run of the build
-  sets: WireSet[];     // one per channel that has devices
+  sets: WireSet[];     // one per channel that carries wire (none when the build is all data jacks)
 }
-type WireInput = Pick<WiremoldBuild, 'lengthIn' | 'devices' | 'feed'> & { whipIn?: number | null; channels?: number; places?: Place[] };
+type WireInput = Pick<WiremoldBuild, 'lengthIn' | 'devices' | 'feed'> & { whipIn?: number | null; channels?: number; places?: Place[]; deviceTypes?: DeviceType[] };
 export function conductorLength(b: WireInput): WireLength {
   const perSetWhips = b.whipIn ? feedCount(b.feed) : 0;
   const perSetWhipIn = (b.whipIn || 0) * perSetWhips;
@@ -312,7 +327,7 @@ export function conductorLength(b: WireInput): WireLength {
   }));
   return {
     runIn: b.lengthIn * sets.length,
-    devicesIn: b.devices * DEVICE_WIRE_IN,
+    devicesIn: sets.reduce((n, x) => n + x.devices, 0) * DEVICE_WIRE_IN,
     whipIn: perSetWhipIn * sets.length,
     whips: perSetWhips * sets.length,
     totalIn: sets.reduce((n, x) => n + x.totalIn, 0),
@@ -321,16 +336,21 @@ export function conductorLength(b: WireInput): WireLength {
 }
 // One channel:  "23'-0" each — 12'-0" run + 5'-0" for 5 devices + 6'-0" for the whip"
 // Both channels: "top channel 16'-0" each (4 devices) · bottom channel 13'-0" each (1 device) — …"
+// When the build also has data jacks, the devices are called "power devices" so
+// it is clear the jacks were left out.
 export function wireLengthText(b: WireInput): string {
   const w = conductorLength(b);
-  const plural = (n: number) => `${n} device${n === 1 ? '' : 's'}`;
-  const perSetWhips = w.sets.length ? w.whips / w.sets.length : 0;
+  const power = w.sets.reduce((n, x) => n + x.devices, 0);
+  const word = power < b.devices ? 'power device' : 'device';
+  const plural = (n: number) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  if (!w.sets.length) return 'No wire — this build has only data jacks';
+  const perSetWhips = w.whips / w.sets.length;
   const whip = perSetWhips ? ` + ${formatLength(w.whipIn / w.sets.length)} for ${perSetWhips === 1 ? 'the whip' : '2 whips'}` : '';
   if (w.sets.length === 1) {
-    return `${formatLength(w.totalIn)} each — ${formatLength(b.lengthIn)} run + ${formatLength(w.devicesIn)} for ${plural(b.devices)}${whip}`;
+    return `${formatLength(w.totalIn)} each — ${formatLength(b.lengthIn)} run + ${formatLength(w.devicesIn)} for ${plural(power)}${whip}`;
   }
   const each = w.sets.map(x => `${x.place} channel ${formatLength(x.totalIn)} each (${plural(x.devices)})`).join(' · ');
-  return `${each} — every channel with devices gets its own set: ${formatLength(b.lengthIn)} run + ${formatLength(DEVICE_WIRE_IN)} per device${whip}`;
+  return `${each} — every channel with ${word}s gets its own set: ${formatLength(b.lengthIn)} run + ${formatLength(DEVICE_WIRE_IN)} per ${word}${whip}`;
 }
 
 // A ticket stored before a field existed simply doesn't have it. This fills in
@@ -340,7 +360,7 @@ export function fillBuild(raw: any): WiremoldBuild {
   const series = typeof raw.series === 'string' ? raw.series : '';
   const horizontal = raw.horizontal === true;
   const defs = boxDefaults(series, horizontal);
-  const deviceTypes: DeviceType[] = Array.from({ length: devices }, (_, i) => (raw.deviceTypes?.[i] === 'double' ? 'double' : 'duplex'));
+  const deviceTypes: DeviceType[] = Array.from({ length: devices }, (_, i) => (isDeviceType(raw.deviceTypes?.[i]) ? raw.deviceTypes[i] : 'duplex'));
   const channels: 1 | 2 = raw.channels === 2 ? 2 : 1;
   const places: Place[] = Array.from({ length: devices }, (_, i) => (channels === 2 && raw.places?.[i] === 'bottom' ? 'bottom' : 'top'));
   const widthsIn: number[] = Array.from({ length: devices }, (_, i) => {
@@ -433,7 +453,7 @@ export function checkBuild(raw: any): BuildCheck {
   const measure: Measure = raw?.measure === 'clear' ? 'clear' : 'center';
   let deviceTypes: DeviceType[] = Array(devices).fill('duplex');
   if (raw?.deviceTypes !== undefined) {
-    if (!Array.isArray(raw.deviceTypes) || raw.deviceTypes.length !== devices || !raw.deviceTypes.every(isDeviceType)) return bad('every device must be duplex or double duplex');
+    if (!Array.isArray(raw.deviceTypes) || raw.deviceTypes.length !== devices || !raw.deviceTypes.every(isDeviceType)) return bad('every device must be a duplex, a double duplex or a data jack');
     deviceTypes = raw.deviceTypes;
   }
   // Top or bottom channel. Only a double has a bottom, so on a single everything is top.
@@ -533,7 +553,7 @@ export const emptyBuildDraft = (): BuildDraft => ({
   label: '', qty: '1', series: '', channels: 1, length: '', devices: '',
   deviceType: 'duplex', types: [], place: 'top', places: [], horizontal: false, boxDuplex: '', boxDouble: '',
   measure: 'clear', spacing: '', gaps: [], eachGap: false, start: '', feed: 'left', whip: '',
-  deviceColor: DEFAULT_DEVICE_COLOR, colors: [], each: false,
+  deviceColor: DEFAULT_DEVICE_COLOR, colors: [], each: true,   // the list of devices starts open — that is where one device is made different
   wireType: DEFAULT_WIRE_TYPE, wireSize: DEFAULT_WIRE_SIZE,
   conductors: WIRE_PRESETS[0].conductors.map(c => ({ ...c }))
 });
@@ -594,13 +614,14 @@ export function resolveDraft(d: BuildDraft): DraftResult {
     if (v === null || !(v > 0) || v > MAX_BOX_IN) errors.box = errors.box || `"${txt}" isn't a box length — try 2 3/4" or 12"`;
     else size[t] = v;
   }
-  const box: Record<DeviceType, string> = { duplex: formatLength(size.duplex), double: formatLength(size.double) };
+  if ((d.boxDuplex || '').trim()) size.data = size.duplex;   // a typed duplex size is the data jack's size too (same plate)
+  const box: Record<DeviceType, string> = { duplex: formatLength(size.duplex), double: formatLength(size.double), data: formatLength(size.data) };
 
   // each device's type, and so how much of the run its box takes
   let deviceTypes: DeviceType[] = [];
   let widthsIn: number[] = [];
   if (Number.isFinite(devices)) {
-    const all: DeviceType = d.deviceType === 'double' ? 'double' : 'duplex';
+    const all: DeviceType = isDeviceType(d.deviceType) ? d.deviceType : 'duplex';
     const own = d.types || [];
     deviceTypes = Array.from({ length: devices }, (_, i) => (isDeviceType(own[i]) ? own[i] as DeviceType : all));
     widthsIn = deviceTypes.map(t => size[t]);
@@ -818,7 +839,8 @@ export function ticketTotals(builds: WiremoldBuild[]): TicketTotals {
     devices += b.devices * b.qty;
     const wl = conductorLength(b);
     const each = wl.totalIn;               // every set of this color, for one run
-    const sets = wl.sets.length;           // one piece per channel that has devices
+    const sets = wl.sets.length;           // one piece per channel that carries wire
+    if (!sets) continue;                   // all data jacks: nothing to cut for this build
     for (const c of b.wire.conductors) {
       const key = `${b.wire.type}|${b.wire.size}|${c.color}`;
       const line = acc.get(key) || { type: b.wire.type, size: b.wire.size, color: wireColor(c.color), pieces: 0, inches: 0 };

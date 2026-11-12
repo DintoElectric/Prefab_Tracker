@@ -28,7 +28,8 @@ const hair = 'var(--color-neutral-400)';
 
 // One device box. `units` is 1 for a duplex, 2 for a double duplex; each unit
 // shows its two outlets — stacked when the box stands up, side by side when it
-// lies along the raceway.
+// lies along the raceway. A data jack shows the triangle used for a data outlet
+// on the drawings instead.
 function DeviceBox({ cx, cy, w, h, type, horizontal, color, place }: {
   cx: number; cy: number; w: number; h: number; type: DeviceType; horizontal: boolean; color: DeviceColor; place: Place;
 }) {
@@ -38,7 +39,13 @@ function DeviceBox({ cx, cy, w, h, type, horizontal, color, place }: {
   const marks: JSX.Element[] = [];
   for (let u = 0; u < units; u++) {
     const ux = x0 + unitW * (u + 0.5);
-    if (horizontal) {
+    if (type === 'data') {
+      const t = Math.min(15, unitW - 6, h - 12);      // triangle size, to fit the box
+      if (t >= 4) {
+        marks.push(<polygon key={`t${u}`} className="wm-data-mark" points={`${ux},${cy - t / 2} ${ux - t / 2},${cy + t / 2} ${ux + t / 2},${cy + t / 2}`}
+          fill={color.ink} opacity={0.62} />);
+      }
+    } else if (horizontal) {
       const ow = Math.min(13, (unitW - 11) / 2), oh = Math.min(10, h - 12);
       if (ow >= 3 && oh >= 3) {
         marks.push(<rect key={`a${u}`} x={ux - 2.5 - ow} y={cy - oh / 2} width={ow} height={oh} rx={2} fill={color.ink} opacity={0.42} />);
@@ -91,6 +98,7 @@ export function WiremoldDiagram({ build: raw }: { build: WiremoldBuild }) {
   // fills a single raceway; on a double it stands in its channel, a little proud of it.
   const boxH = g.horizontal ? chH + 8 : double ? chH + 14 : DEV_H;
   const boxCy = (place: Place) => (double ? chCy(place) : BAR_CY);
+  const wired = g.wired.length > 0;            // false when every device is a data jack: no wire, so no feed
   const feedCy = g.wired.length === 1 ? chCy(g.wired[0]) : BAR_CY;   // into the wired channel, or between the two
   const labelY = BAR_CY + DEV_H / 2 + 16;      // device numbers share one baseline
 
@@ -159,8 +167,8 @@ export function WiremoldDiagram({ build: raw }: { build: WiremoldBuild }) {
             {!isLast && <path d={`M ${xr - 3},${y(barTop - 5)} L ${xr + 3},${y(barTop + barH + 5)}`} style={{ stroke: muted }} strokeWidth={2} />}
 
             {/* feed: a whip, or the wire end capped */}
-            {isFirst && feedLeft && <FeedArrow x={xl} cy={y(feedCy)} capTop={y(barTop - 5)} capH={barH + 10} dir="right" whipIn={build.whipIn} />}
-            {isLast && feedRight && <FeedArrow x={xr} cy={y(feedCy)} capTop={y(barTop - 5)} capH={barH + 10} dir="left" whipIn={build.whipIn} />}
+            {wired && isFirst && feedLeft && <FeedArrow x={xl} cy={y(feedCy)} capTop={y(barTop - 5)} capH={barH + 10} dir="right" whipIn={build.whipIn} />}
+            {wired && isLast && feedRight && <FeedArrow x={xr} cy={y(feedCy)} capTop={y(barTop - 5)} capH={barH + 10} dir="left" whipIn={build.whipIn} />}
 
             {/* dimensions: one line per piece, its text printed once */}
             {segs.map(({ s, i }) => {
@@ -263,7 +271,10 @@ export function WiremoldFigure({ build: raw }: { build: WiremoldBuild }) {
   const feed = FEED_ENDS.find(f => f.v === build.feed)!.label;
 
   // box sizes actually on this build, by type
-  const kinds: { type: DeviceType; label: string }[] = [{ type: 'duplex', label: 'duplex' }, { type: 'double', label: 'double duplex' }];
+  const kinds: { type: DeviceType; label: string }[] = [
+    { type: 'duplex', label: 'duplex' }, { type: 'double', label: 'double duplex' }, { type: 'data', label: 'data jack' }
+  ];
+  const hasWire = wiredChannels(build).length > 0;
   const boxes = kinds.map(k => {
     const idx = build.deviceTypes.map((t, i) => (t === k.type ? i : -1)).filter(i => i >= 0);
     const sizes = Array.from(new Set(idx.map(i => build.widthsIn[i])));
@@ -288,7 +299,8 @@ export function WiremoldFigure({ build: raw }: { build: WiremoldBuild }) {
           <span className="wm-key">{build.horizontal ? 'turned along the raceway' : 'standing up'}</span>
           {build.channels === 2 && (
             <span className="wm-key">
-              <b>{wiredChannels(build).map(c => `${c.devices} in the ${c.place} channel`).join(' · ')}</b>
+              <b>{(['top', 'bottom'] as Place[]).map(pl => ({ pl, n: build.places.filter(x => x === pl).length })).filter(x => x.n)
+                .map(x => `${x.n} in the ${x.pl} channel`).join(' · ')}</b>
             </span>
           )}
           <span className="wm-note">Spacing shown {build.measure === 'clear' ? 'between boxes' : 'center to center'}</span>
@@ -316,16 +328,21 @@ export function WiremoldFigure({ build: raw }: { build: WiremoldBuild }) {
         </div>
         <div className="wm-legend-row">
           <span className="wm-legend-k">Cut wire</span>
-          <span className="wm-key"><b>{wireLengthText(build)}</b></span>
+          {/* a full sentence when both channels are wired — it must be allowed to wrap */}
+          <span className="wm-long"><b>{wireLengthText(build)}</b></span>
         </div>
         <div className="wm-legend-row">
           <span className="wm-legend-k">Fed from</span>
-          <span className="wm-key"><b>{feed}</b></span>
-          <span className="wm-key">
-            {build.whipIn
-              ? `${formatLength(build.whipIn)} whip${build.feed === 'both' ? ' at each end' : ''}`
-              : 'no whip — wire end capped'}
-          </span>
+          {hasWire ? (
+            <>
+              <span className="wm-key"><b>{feed}</b></span>
+              <span className="wm-key">
+                {build.whipIn
+                  ? `${formatLength(build.whipIn)} whip${build.feed === 'both' ? ' at each end' : ''}`
+                  : 'no whip — wire end capped'}
+              </span>
+            </>
+          ) : <span className="wm-key">Not fed — data jacks only</span>}
           <span className="wm-note">Left and right as you face the run · lengths to scale along the run</span>
         </div>
       </figcaption>
