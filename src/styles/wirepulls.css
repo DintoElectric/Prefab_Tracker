@@ -112,3 +112,19 @@
 
 /* a circuit that is also in another box: allowed, so this is information, not an error */
 .wp-box-tbl .wp-repeat { color: var(--color-neutral-600); font-size: 12px; margin-top: 6px; }
+
+/* the sheet's wire: insulation type and size, side by side */
+.wp-wire { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 8px; max-width: 460px; }
+.wp-wire-help { font-size: 12px; color: var(--color-neutral-600); margin-top: 6px; }
+/* a box's own wire: a small dropdown under its circuits — quiet until one is picked */
+.wp-box-tbl .wp-rowwire { margin-top: 8px; max-width: 100%; height: 32px; padding: 0 8px; font-size: 12px; color: var(--color-neutral-700);
+  border: 1px solid var(--color-neutral-300); background: #fff; border-radius: 0; }
+.wp-box-tbl .wp-rowwire.own { color: var(--color-text); font-weight: 700; border-color: var(--color-text); background: #fff7e0; }
+/* the cut list: which wire */
+.wp-rpt td.box .w { font-size: 11px; color: var(--color-neutral-700); margin-top: 4px; }
+.wp-rpt td.box .w.own { display: inline-block; font-weight: 700; color: var(--color-text); background: #fff7e0; border: 1px solid var(--color-text); padding: 1px 5px; }
+.wp-wire-tag { display: inline-block; margin-left: 10px; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--color-text); }
+.wp-wire-tag.lead { margin-left: 0; font-family: var(--font-heading); font-size: 14px; font-weight: 800; }
+.wp-wire-boxes { margin-left: 10px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--color-neutral-700); }
+.wp-rpt.wp-grand tr.total td { border-top: 2px solid var(--color-text); }
+@media print { .wp-box-tbl .wp-rowwire.own, .wp-rpt td.box .w.own { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }

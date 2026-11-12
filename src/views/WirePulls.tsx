@@ -4,8 +4,10 @@ import { StatusTag, PrioTag } from '../lib/ui';
 import { api } from '../lib/api';
 import {
   SYSTEMS, DEFAULT_SYSTEM, MAX_CIRCUIT, MAX_FILES, MAX_FILE_BYTES, FILE_ACCEPT, WP_STATUSES, WIRE_COLORS,
+  WIRE_TYPES, WIRE_SIZES, DEFAULT_WIRE_TYPE, DEFAULT_WIRE_SIZE, isWireType, isWireSize, wireSpecLabel,
   systemDef, phaseColor, parseCircuits, parseFootages, wiresFor, checkBoxRows, repeatNotes, buildReport, fmtFeet,
-  type VoltageSystem, type BoxRow, type BoxInput, type WirePullSheet, type SheetReport, type WireColor, type FileMeta
+  type VoltageSystem, type BoxRow, type BoxInput, type WirePullSheet, type SheetReport, type WireColor, type FileMeta,
+  type ColorTotal
 } from '../data/wirepulls';
 import '../styles/wirepulls.css';
 
@@ -43,6 +45,7 @@ function ReportTable({ report }: { report: SheetReport }) {
               <td className="box" rowSpan={b.groups.length}>
                 <div className="b">Box {b.box}</div>
                 <div className="s">{b.feet ? fmtFeet(b.feet) : 'no footage yet'}</div>
+                {(report.byWire.length > 1 || b.ownWire) && <div className={'w' + (b.ownWire ? ' own' : '')}>{wireSpecLabel(b.wire)}</div>}
               </td>
             )}
             <td><Swatch color={g.color} />{g.color.label}{g.kind === 'neutral' && <span className="wp-neu"> · neutral</span>}</td>
@@ -62,32 +65,81 @@ function ReportTable({ report }: { report: SheetReport }) {
   );
 }
 
+function ColorRows({ totals }: { totals: ColorTotal[] }) {
+  return (
+    <>
+      {totals.map(t => (
+        <tr key={t.phase}>
+          <td><Swatch color={t.color} />{t.color.label}{t.kind === 'neutral' && <span className="wp-neu"> · neutral</span>}</td>
+          <td className="num">{t.wires}</td>
+          <td className="num">{t.feet ? fmtFeet(t.feet) : '—'}</td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+// One wire on the sheet: a single table, as before, headed with that wire.
+// More than one (a box upsized to #10, say): a table for each, because each is
+// cut from different spools, then the whole sheet.
 function TotalsTable({ report }: { report: SheetReport }) {
   if (!report.totals.length) return null;
-  return (
-    <table className="wp-rpt">
-      <thead>
-        <tr>
-          <th>All boxes together</th>
-          <th className="num" style={{ width: 80 }}>Wires</th>
-          <th className="num" style={{ width: 120 }}>Feet</th>
-        </tr>
-      </thead>
-      <tbody>
-        {report.totals.map(t => (
-          <tr key={t.phase}>
-            <td><Swatch color={t.color} />{t.color.label}{t.kind === 'neutral' && <span className="wp-neu"> · neutral</span>}</td>
-            <td className="num">{t.wires}</td>
-            <td className="num">{t.feet ? fmtFeet(t.feet) : '—'}</td>
+  if (report.byWire.length <= 1) {
+    const only = report.byWire[0];
+    return (
+      <table className="wp-rpt wp-totals">
+        <thead>
+          <tr>
+            <th>All boxes together{only && <span className="wp-wire-tag">{only.label}</span>}</th>
+            <th className="num" style={{ width: 80 }}>Wires</th>
+            <th className="num" style={{ width: 120 }}>Feet</th>
           </tr>
-        ))}
-        <tr className="total">
-          <td>Total</td>
-          <td className="num">{report.wires}</td>
-          <td className="num">{fmtFeet(report.feet)}</td>
-        </tr>
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          <ColorRows totals={report.totals} />
+          <tr className="total">
+            <td>Total</td>
+            <td className="num">{report.wires}</td>
+            <td className="num">{fmtFeet(report.feet)}</td>
+          </tr>
+        </tbody>
+      </table>
+    );
+  }
+  return (
+    <>
+      {report.byWire.map(w => (
+        <table className="wp-rpt wp-totals" key={w.label} data-wire={w.label}>
+          <thead>
+            <tr>
+              <th>
+                <span className="wp-wire-tag lead">{w.label}</span>
+                <span className="wp-wire-boxes">box{w.boxes.length === 1 ? '' : 'es'} {w.boxes.join(', ')}</span>
+              </th>
+              <th className="num" style={{ width: 80 }}>Wires</th>
+              <th className="num" style={{ width: 120 }}>Feet</th>
+            </tr>
+          </thead>
+          <tbody>
+            <ColorRows totals={w.totals} />
+            <tr className="total">
+              <td>Total {w.label}</td>
+              <td className="num">{w.wires}</td>
+              <td className="num">{fmtFeet(w.feet)}</td>
+            </tr>
+          </tbody>
+        </table>
+      ))}
+      <table className="wp-rpt wp-totals wp-grand">
+        <tbody>
+          <tr className="total">
+            <td>Whole sheet — {report.byWire.length} wires</td>
+            <td className="num" style={{ width: 80 }}>{report.wires}</td>
+            <td className="num" style={{ width: 120 }}>{fmtFeet(report.feet)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </>
   );
 }
 
@@ -216,8 +268,10 @@ function CircuitsField({ value, onChange, system, label, neutrals, onToggleNeutr
 
 // ───────────────────────── foreman sheet ─────────────────────────
 
-interface BoxDraft { box: string; circuits: string; footage: string; neutrals: number[]; }
-const blankRow = (): BoxDraft => ({ box: '', circuits: '', footage: '', neutrals: [] });
+// wireType / wireSize on a row are '' unless that box has its own wire
+interface BoxDraft { box: string; circuits: string; footage: string; neutrals: number[]; wireType: string; wireSize: string; }
+const blankRow = (): BoxDraft => ({ box: '', circuits: '', footage: '', neutrals: [], wireType: '', wireSize: '' });
+const hasOwnWire = (r: { wireType: string; wireSize: string }) => isWireType(r.wireType) && isWireSize(r.wireSize);
 const isBlank = (r: BoxDraft) => !r.box.trim() && !r.circuits.trim() && !r.footage.trim();
 const withTrailingBlank = (rows: BoxDraft[]): BoxDraft[] =>
   rows.length && isBlank(rows[rows.length - 1]) ? rows : [...rows, blankRow()];
@@ -225,10 +279,12 @@ const START_ROWS = 6;
 
 interface Draft {
   job: string; floor: string; panel: string; system: VoltageSystem;
+  wireType: string; wireSize: string;   // the wire for the whole sheet
   needBy: string; priority: 'Standard' | 'Hot'; notes: string; rows: BoxDraft[];
 }
 const emptyDraft = (): Draft => ({
-  job: '', floor: '', panel: '', system: DEFAULT_SYSTEM, needBy: '', priority: 'Standard', notes: '',
+  job: '', floor: '', panel: '', system: DEFAULT_SYSTEM, wireType: DEFAULT_WIRE_TYPE, wireSize: DEFAULT_WIRE_SIZE,
+  needBy: '', priority: 'Standard', notes: '',
   rows: Array.from({ length: START_ROWS }, blankRow)
 });
 
@@ -241,10 +297,17 @@ function loadDraft(username: string): Draft {
     const mine = all[username];
     if (mine && typeof mine === 'object' && Array.isArray(mine.rows)) {
       const d = { ...emptyDraft(), ...mine } as Draft;
-      d.rows = withTrailingBlank(d.rows.map((r: any) => ({
-        box: String(r?.box ?? ''), circuits: String(r?.circuits ?? ''), footage: String(r?.footage ?? ''),
-        neutrals: Array.isArray(r?.neutrals) ? r.neutrals.filter((n: unknown) => Number.isInteger(n)) : []
-      })));
+      // a draft typed before wire could be chosen starts at the standard wire
+      if (!isWireType(d.wireType)) d.wireType = DEFAULT_WIRE_TYPE;
+      if (!isWireSize(d.wireSize)) d.wireSize = DEFAULT_WIRE_SIZE;
+      d.rows = withTrailingBlank(d.rows.map((r: any) => {
+        const own = isWireType(r?.wireType) && isWireSize(r?.wireSize);
+        return {
+          box: String(r?.box ?? ''), circuits: String(r?.circuits ?? ''), footage: String(r?.footage ?? ''),
+          neutrals: Array.isArray(r?.neutrals) ? r.neutrals.filter((n: unknown) => Number.isInteger(n)) : [],
+          wireType: own ? r.wireType : '', wireSize: own ? r.wireSize : ''
+        };
+      }));
       return d;
     }
   } catch { /* fresh */ }
@@ -284,9 +347,13 @@ function SheetForm({ user, flash, onSubmitted }: {
     const valid: BoxRow[] = [];
     draft.rows.forEach((r, i) => {
       if (isBlank(r) || problems[i] !== null) return;
-      valid.push({ box: r.box.trim(), wires: wiresFor(parsed[i].circuits, parsed[i].footages, r.neutrals) });
+      valid.push({
+        box: r.box.trim(), wires: wiresFor(parsed[i].circuits, parsed[i].footages, r.neutrals),
+        ...(hasOwnWire(r) ? { wireType: r.wireType, wireSize: r.wireSize } : {})
+      });
     });
-    return { parsed, problems, repeats: repeatNotes(parsed), valid, report: buildReport(valid, draft.system) };
+    const sheetWire = { wireType: draft.wireType, wireSize: draft.wireSize };
+    return { parsed, problems, repeats: repeatNotes(parsed), valid, report: buildReport(valid, draft.system, sheetWire) };
   }, [draft]);
 
   const filled = draft.rows.filter(r => !isBlank(r)).length;
@@ -299,10 +366,12 @@ function SheetForm({ user, flash, onSubmitted }: {
     if (bad) { flash('Fix the highlighted boxes first'); return; }
     setBusy(true);
     try {
-      const { sheet } = await api.createWirePull({
+      const payload = {
         job: draft.job, floor: draft.floor, panel: draft.panel, system: draft.system,
+        wireType: draft.wireType, wireSize: draft.wireSize,
         needBy: draft.needBy, priority: draft.priority, notes: draft.notes, boxes: valid
-      });
+      };
+      const { sheet } = await api.createWirePull(payload);
       // Foremen usually send several panels for one job, so keep the job-level
       // fields and clear only what belongs to this panel.
       setDraft({ ...draft, panel: '', notes: '', rows: emptyDraft().rows });
@@ -377,6 +446,19 @@ function SheetForm({ user, flash, onSubmitted }: {
             ))}
           </div>
         </div>
+        {/* full width: the header is a two-column grid and this is its seventh cell */}
+        <div className="wp-cell full">
+          <span className="wp-lbl">Wire — insulation type and size</span>
+          <div className="wp-wire">
+            <select className="input" aria-label="Wire type" value={draft.wireType} onChange={e => patch({ wireType: e.target.value })}>
+              {WIRE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <select className="input" aria-label="Wire size" value={draft.wireSize} onChange={e => patch({ wireSize: e.target.value })}>
+              {WIRE_SIZES.map(z => <option key={z} value={z}>#{z}</option>)}
+            </select>
+          </div>
+          <div className="wp-wire-help">For every box on this sheet. A box pulled in something else gets its own under its circuits.</div>
+        </div>
         <div className="wp-cell full">
           <label htmlFor="wp-notes">Notes for prefab</label>
           <textarea id="wp-notes" className="input" rows={2} placeholder="Label each wire with its circuit number."
@@ -441,6 +523,22 @@ function SheetForm({ user, flash, onSubmitted }: {
                     {why && <div className="why">{why}</div>}
                     {/* the same circuit in another box is allowed — this only says where, in case it is a slip */}
                     {!why && repeats[i] && <div className="wp-repeat">{repeats[i]}</div>}
+                    {/* this box's wire: the sheet's unless one is picked here */}
+                    {(!isBlank(r) || hasOwnWire(r)) && (
+                      <select className={'wp-rowwire' + (hasOwnWire(r) ? ' own' : '')} aria-label={`Row ${i + 1} wire`}
+                        value={hasOwnWire(r) ? `${r.wireSize}|${r.wireType}` : ''}
+                        onChange={e => {
+                          const [size, ...rest] = e.target.value.split('|');
+                          setRow(i, e.target.value ? { wireSize: size, wireType: rest.join('|') } : { wireSize: '', wireType: '' });
+                        }}>
+                        <option value="">Wire: same as sheet ({wireSpecLabel({ type: draft.wireType, size: draft.wireSize })})</option>
+                        {WIRE_TYPES.map(t => (
+                          <optgroup key={t} label={`This box only — ${t}`}>
+                            {WIRE_SIZES.map(z => <option key={z} value={`${z}|${t}`}>#{z} {t}</option>)}
+                          </optgroup>
+                        ))}
+                      </select>
+                    )}
                   </td>
                   <td className="fx">
                     <div className="wp-ft">
@@ -558,7 +656,7 @@ function SheetCard({ sheet, canWork, canAttach, isAdmin, startOpen, flash, onAdv
 }) {
   const [open, setOpen] = useState(startOpen);
   const [confirmDel, setConfirmDel] = useState(false);
-  const report = useMemo(() => buildReport(sheet.boxes, sheet.system), [sheet]);
+  const report = useMemo(() => buildReport(sheet.boxes, sheet.system, sheet), [sheet]);
   const next = WP_STATUSES[Math.min(WP_STATUSES.indexOf(sheet.status) + 1, WP_STATUSES.length - 1)];
   const closed = sheet.status === 'Closed';
 
@@ -575,6 +673,14 @@ function SheetCard({ sheet, canWork, canAttach, isAdmin, startOpen, flash, onAdv
         {sheet.floor && <div><div className="k">Floor</div><div className="v">{sheet.floor}</div></div>}
         <div><div className="k">Panel</div><div className="v">{sheet.panel}</div></div>
         <div><div className="k">Voltage</div><div className="v">{systemDef(sheet.system).label}</div></div>
+        <div>
+          <div className="k">Wire</div>
+          <div className="v">
+            {report.byWire.length > 1
+              ? report.byWire.map(w => w.label).join(' + ')
+              : report.byWire[0]?.wire ? report.byWire[0].label : 'Not specified'}
+          </div>
+        </div>
         <div><div className="k">Boxes</div><div className="v">{sheet.boxes.length}</div></div>
         <div><div className="k">Wires</div><div className="v">{report.wires}</div></div>
         <div><div className="k">Total wire</div><div className="v">{fmtFeet(report.feet)}</div></div>

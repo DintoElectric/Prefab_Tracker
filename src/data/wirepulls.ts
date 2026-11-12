@@ -101,6 +101,21 @@ export function parseFootages(text: string): { footages: number[]; bad: string[]
   return { footages, bad };
 }
 
+// ── the wire itself: insulation type and size ──
+// The same lists the Wiremold tickets use. A sheet has one wire for the whole
+// panel; a box can have its own (a long run upsized to #10, say).
+export const WIRE_TYPES = ['THHN/THWN-2', 'XHHW-2', 'Other — see notes'];
+export const WIRE_SIZES = ['14', '12', '10', '8'];
+export const DEFAULT_WIRE_TYPE = WIRE_TYPES[0];
+export const DEFAULT_WIRE_SIZE = '12';
+export const isWireType = (v: unknown): v is string => typeof v === 'string' && WIRE_TYPES.includes(v);
+export const isWireSize = (v: unknown): v is string => typeof v === 'string' && WIRE_SIZES.includes(v);
+export interface WireSpec { type: string; size: string; }
+// '#12 THHN/THWN-2'. A sheet sent before wire could be chosen has none — say so
+// rather than guess.
+export const wireSpecLabel = (w: WireSpec | null) => (w ? `#${w.size} ${w.type}` : 'Wire not specified');
+const specKey = (w: WireSpec | null) => (w ? `${w.size}|${w.type}` : '');
+
 // ── rows ──
 export interface Wire {
   circuit: number;
@@ -110,6 +125,14 @@ export interface Wire {
 export interface BoxRow {
   box: string;             // box number as written: '39', '12A'
   wires: Wire[];           // one wire per circuit, in the order listed
+  wireType?: string;       // only when this box's wire differs from the sheet's…
+  wireSize?: string;       // …both are given together, or neither
+}
+// The wire a box is pulled in: its own if it has one, otherwise the sheet's.
+export function boxWire(row: Pick<BoxRow, 'wireType' | 'wireSize'>, sheet?: { wireType?: string; wireSize?: string }): WireSpec | null {
+  if (isWireType(row.wireType) && isWireSize(row.wireSize)) return { type: row.wireType, size: row.wireSize };
+  if (sheet && isWireType(sheet.wireType) && isWireSize(sheet.wireSize)) return { type: sheet.wireType, size: sheet.wireSize };
+  return null;
 }
 
 // One footage typed → every wire gets it. A list → one per circuit, in order.
@@ -200,6 +223,8 @@ export interface ColorGroup {
 }
 export interface BoxReport {
   box: string;
+  wire: WireSpec | null;  // the wire this box is pulled in (null: sent before wire could be chosen)
+  ownWire: boolean;       // true when the box has its own wire, different from the sheet's
   groups: ColorGroup[];   // A, B, C, then neutral — only lines that are in use
   wires: number;          // total conductors in the box (hots + neutrals)
   feet: number;
@@ -213,15 +238,26 @@ export interface ColorTotal {
   feet: number;
   unmeasured: number;
 }
+// Everything pulled in one wire (one type and size), by color — one spool rack's worth.
+export interface WireTotal {
+  wire: WireSpec | null;
+  label: string;          // '#12 THHN/THWN-2'
+  boxes: string[];        // the boxes pulled in this wire
+  totals: ColorTotal[];
+  wires: number;
+  feet: number;
+  unmeasured: number;
+}
 export interface SheetReport {
   boxes: BoxReport[];
-  totals: ColorTotal[];   // every box combined, by color
+  byWire: WireTotal[];    // one entry per wire in use — the sheet's own wire first
+  totals: ColorTotal[];   // every box combined, by color (all wires together)
   wires: number;
   feet: number;
   unmeasured: number;
 }
 
-export function buildReport(rows: BoxRow[], system: VoltageSystem): SheetReport {
+export function buildReport(rows: BoxRow[], system: VoltageSystem, sheetWire?: { wireType?: string; wireSize?: string }): SheetReport {
   const def = systemDef(system);
   const slots = [
     ...[0, 1, 2].map(i => ({ color: WIRE_COLORS[def.phases[i]], phase: PHASE_LETTERS[i] as 'A' | 'B' | 'C' | 'N', kind: 'hot' as const })),
@@ -230,13 +266,28 @@ export function buildReport(rows: BoxRow[], system: VoltageSystem): SheetReport 
   const NEUTRAL = 3;
   const totals: ColorTotal[] = slots.map(sl => ({ ...sl, wires: 0, feet: 0, unmeasured: 0 }));
 
+  // one running total per wire (type + size), in the order they are first met —
+  // except the sheet's own wire, which always leads
+  const sheetSpec = boxWire({}, sheetWire);
+  const perWire = new Map<string, { wire: WireSpec | null; boxes: string[]; totals: ColorTotal[] }>();
+  const bucket = (w: WireSpec | null) => {
+    const k = specKey(w);
+    if (!perWire.has(k)) perWire.set(k, { wire: w, boxes: [], totals: slots.map(sl => ({ ...sl, wires: 0, feet: 0, unmeasured: 0 })) });
+    return perWire.get(k)!;
+  };
+  if (sheetSpec && rows.some(r => specKey(boxWire(r, sheetWire)) === specKey(sheetSpec))) bucket(sheetSpec);
+
   const boxes: BoxReport[] = rows.map(r => {
+    const wire = boxWire(r, sheetWire);
+    const mine = bucket(wire);
+    if (!mine.boxes.includes(r.box)) mine.boxes.push(r.box);
     const groups: ColorGroup[] = slots.map(sl => ({ ...sl, wires: [], feet: 0, unmeasured: 0 }));
     const add = (slot: number, w: Wire) => {
       groups[slot].wires.push(w);
       totals[slot].wires += 1;
-      if (w.footage === null) { groups[slot].unmeasured += 1; totals[slot].unmeasured += 1; }
-      else { groups[slot].feet += w.footage; totals[slot].feet += w.footage; }
+      mine.totals[slot].wires += 1;
+      if (w.footage === null) { groups[slot].unmeasured += 1; totals[slot].unmeasured += 1; mine.totals[slot].unmeasured += 1; }
+      else { groups[slot].feet += w.footage; totals[slot].feet += w.footage; mine.totals[slot].feet += w.footage; }
     };
     for (const w of r.wires) {
       add(phaseIndex(w.circuit), w);
@@ -245,6 +296,8 @@ export function buildReport(rows: BoxRow[], system: VoltageSystem): SheetReport 
     const used = groups.filter(g => g.wires.length);
     return {
       box: r.box,
+      wire,
+      ownWire: specKey(wire) !== specKey(sheetSpec),
       groups: used,
       wires: used.reduce((n, g) => n + g.wires.length, 0),
       feet: used.reduce((n, g) => n + g.feet, 0),
@@ -253,8 +306,18 @@ export function buildReport(rows: BoxRow[], system: VoltageSystem): SheetReport 
   });
 
   const used = totals.filter(t => t.wires > 0);
+  const byWire: WireTotal[] = Array.from(perWire.values()).map(b => {
+    const t = b.totals.filter(x => x.wires > 0);
+    return {
+      wire: b.wire, label: wireSpecLabel(b.wire), boxes: b.boxes, totals: t,
+      wires: t.reduce((n, x) => n + x.wires, 0),
+      feet: t.reduce((n, x) => n + x.feet, 0),
+      unmeasured: t.reduce((n, x) => n + x.unmeasured, 0)
+    };
+  });
   return {
     boxes,
+    byWire,
     totals: used,
     wires: used.reduce((n, t) => n + t.wires, 0),
     feet: used.reduce((n, t) => n + t.feet, 0),
@@ -296,6 +359,8 @@ export interface WirePullSheet {
   floor: string;
   panel: string;       // 'PP4-2'
   system: VoltageSystem;
+  wireType?: string;   // insulation type for the sheet (absent on sheets sent before wire could be chosen)
+  wireSize?: string;   // '12' = #12
   by: string;          // foreman display name, set from the session
   needBy: string;      // ISO date or ''
   priority: 'Standard' | 'Hot';
@@ -310,7 +375,7 @@ export interface WirePullSheet {
 // function so the API can't be fed nonsense, and runs the same checkBoxRows()
 // the sheet screen uses, so the two can never disagree.
 export type CleanSheet =
-  | { ok: true; value: Pick<WirePullSheet, 'job' | 'floor' | 'panel' | 'system' | 'needBy' | 'priority' | 'notes' | 'boxes'> }
+  | { ok: true; value: Pick<WirePullSheet, 'job' | 'floor' | 'panel' | 'system' | 'wireType' | 'wireSize' | 'needBy' | 'priority' | 'notes' | 'boxes'> }
   | { ok: false; error: string };
 
 export function cleanSheetInput(body: any): CleanSheet {
@@ -321,6 +386,14 @@ export function cleanSheetInput(body: any): CleanSheet {
   const floor = String(body?.floor ?? '').trim().slice(0, 20);
   if (!isSystem(body?.system)) return { ok: false, error: 'Unknown voltage system' };
   const system = body.system as VoltageSystem;
+  // Wire type and size travel together. A browser still running the page from
+  // before they existed sends neither, and that sheet is stored without them.
+  const sheetWire: { wireType?: string; wireSize?: string } = {};
+  if (body?.wireType !== undefined || body?.wireSize !== undefined) {
+    if (!isWireType(body.wireType)) return { ok: false, error: 'Unknown wire type' };
+    if (!isWireSize(body.wireSize)) return { ok: false, error: 'Unknown wire size' };
+    sheetWire.wireType = body.wireType; sheetWire.wireSize = body.wireSize;
+  }
   const needBy = typeof body?.needBy === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.needBy) ? body.needBy : '';
   const priority = body?.priority === 'Hot' ? 'Hot' : 'Standard';
   const notes = String(body?.notes ?? '').slice(0, 2000);
@@ -332,8 +405,16 @@ export function cleanSheetInput(body: any): CleanSheet {
 
   const inputs: BoxInput[] = [];
   const neutralsByRow: number[][] = [];
+  const wireByRow: { wireType?: string; wireSize?: string }[] = [];
   for (const raw of body.boxes) {
     const box = String(raw?.box ?? '').trim().slice(0, 20);
+    const own: { wireType?: string; wireSize?: string } = {};
+    if (raw?.wireType !== undefined || raw?.wireSize !== undefined) {
+      if (!isWireType(raw.wireType)) return { ok: false, error: `Box ${box || '?'}: unknown wire type` };
+      if (!isWireSize(raw.wireSize)) return { ok: false, error: `Box ${box || '?'}: unknown wire size` };
+      own.wireType = raw.wireType; own.wireSize = raw.wireSize;
+    }
+    wireByRow.push(own);
     const wires: any[] = Array.isArray(raw?.wires) ? raw.wires : [];
     const circuits = wires.map(w => Number(w?.circuit));
     const neutrals = wires.filter(w => w?.neutral === true).map(w => Number(w.circuit));
@@ -358,6 +439,6 @@ export function cleanSheetInput(body: any): CleanSheet {
   // empty row in it is malformed — the screen never sends one.
   if (inputs.some(i => !i.box && !i.circuits.length)) return { ok: false, error: 'Empty box row' };
 
-  const boxes: BoxRow[] = inputs.map((i, n) => ({ box: i.box, wires: wiresFor(i.circuits, i.footages, neutralsByRow[n]) }));
-  return { ok: true, value: { job, floor, panel, system, needBy, priority, notes, boxes } };
+  const boxes: BoxRow[] = inputs.map((i, n) => ({ box: i.box, wires: wiresFor(i.circuits, i.footages, neutralsByRow[n]), ...wireByRow[n] }));
+  return { ok: true, value: { job, floor, panel, system, ...sheetWire, needBy, priority, notes, boxes } };
 }
